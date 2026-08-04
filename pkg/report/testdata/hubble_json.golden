@@ -1,0 +1,58 @@
+{
+  "anomalies": [
+    {
+      "description": "Detected scan of 25 ports from staging/api-gw within 10s",
+      "severity": "high",
+      "type": "portscan",
+      "workload": "staging/api-gw"
+    },
+    {
+      "description": "Unusual traffic pattern detected from default/redis",
+      "severity": "medium",
+      "type": "rare_flow",
+      "workload": "default/redis"
+    }
+  ],
+  "patterns": [
+    {
+      "count": 150,
+      "dst": "production/backend",
+      "key": "default/frontend -> production/backend:8080/TCP",
+      "port": 8080,
+      "protocol": "TCP",
+      "src": "default/frontend"
+    },
+    {
+      "count": 80,
+      "dst": "default/postgres",
+      "key": "default/frontend -> default/postgres:5432/TCP",
+      "port": 5432,
+      "protocol": "TCP",
+      "src": "default/frontend"
+    },
+    {
+      "count": 200,
+      "dst": "production/backend",
+      "key": "kube-system/coredns -> production/backend:53/UDP",
+      "port": 53,
+      "protocol": "UDP",
+      "src": "kube-system/coredns"
+    },
+    {
+      "count": 30,
+      "dst": "production/backend",
+      "key": "staging/api-gw -> production/backend:443/TCP",
+      "port": 443,
+      "protocol": "TCP",
+      "src": "staging/api-gw"
+    }
+  ],
+  "summary": {
+    "anomalies_by_severity": {
+      "high": 1,
+      "medium": 1
+    },
+    "total_anomalies": 2,
+    "total_patterns": 4
+  }
+}

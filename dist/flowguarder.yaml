@@ -1,0 +1,70 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: flowguarder
+spec:
+  version: "v1.0.0"
+  homepage: https://github.com/flowguarder/flowguarder
+  shortDescription: Network flow analysis CLI that emits Kubernetes NetworkPolicy manifests
+  description: |
+    flowguarder is a CLI tool that reads Cilium Hubble or Calico OSS flow logs
+    (from files, stdin, or live gRPC streams) and emits annotated Kubernetes
+    NetworkPolicy manifests along with deterministic anomaly and communication-
+    pattern reports.
+
+    It supports offline parsing of Hubble JSON, Calico JSON, and Calico JSON-in-
+    syslog formats, with optional live streaming from Hubble Relay gRPC and file
+    tail for Calico logs.
+
+  caveats:
+    text: |
+      flowguarder is an offline analysis tool. It does NOT:
+        - Run inside the cluster (no controller/operator/CRD)
+        - Automatically apply NetworkPolicy manifests
+        - Require cluster access for offline mode
+
+  platforms:
+    # Linux AMD64
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/flowguarder/flowguarder/releases/download/__VERSION__/flowguarder___VERSION___linux_amd64.tar.gz
+      sha256: 0000000000000000000000000000000000000000000000000000000000000000
+      bin: flowguarder
+
+    # Linux ARM64
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/flowguarder/flowguarder/releases/download/__VERSION__/flowguarder___VERSION___linux_arm64.tar.gz
+      sha256: 0000000000000000000000000000000000000000000000000000000000000000
+      bin: flowguarder
+
+    # Darwin (macOS) AMD64
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/flowguarder/flowguarder/releases/download/__VERSION__/flowguarder___VERSION___darwin_amd64.tar.gz
+      sha256: 0000000000000000000000000000000000000000000000000000000000000000
+      bin: flowguarder
+
+    # Darwin (macOS) ARM64
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/flowguarder/flowguarder/releases/download/__VERSION__/flowguarder___VERSION___darwin_arm64.tar.gz
+      sha256: 0000000000000000000000000000000000000000000000000000000000000000
+      bin: flowguarder
+
+    # Windows AMD64
+    - selector:
+        matchLabels:
+          os: windows
+          arch: amd64
+      uri: https://github.com/flowguarder/flowguarder/releases/download/__VERSION__/flowguarder___VERSION___windows_amd64.tar.gz
+      sha256: 0000000000000000000000000000000000000000000000000000000000000000
+      bin: flowguarder.exe

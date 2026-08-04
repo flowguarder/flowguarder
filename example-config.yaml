@@ -1,0 +1,147 @@
+# flowguarder configuration file
+# Place this at /etc/flowguarder/config.yaml or specify with --config
+
+# --- Cluster CIDRs ---
+# RFC 1918 (10/8, 172.16/12, 192.168/16), RFC 4193 ULA (fd00::/8), and CGNAT (100.64/10)
+# These ranges are classified as "internal" for traffic classification.
+cluster_cidrs:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "fd00::/8"
+  - "100.64.0.0/10"
+
+# --- API Server CIDRs ---
+# IP ranges considered to carry kube-apiserver traffic for ingress/egress classification.
+apiserver_cidrs:
+  - "10.96.0.0/12"
+
+# --- Excluded Namespaces ---
+# Infrastructural namespaces whose flows are silently ignored.
+excluded_namespaces:
+  - "kube-system"
+  - "calico-system"
+  - "tigera-operator"
+
+# --- Kubernetes DNS Ports ---
+# Well-known DNS service ports for identifying DNS traffic in flow analysis.
+kube_dns_ports:
+  - protocol: "UDP"
+    port: 53
+  - protocol: "TCP"
+    port: 53
+
+# --- Rare Flow Threshold ---
+# Percentile (0..1) below which a flow pattern is flagged as rare.
+# Default: 0.01 (1%) — flows occurring in less than 1% of patterns are suspicious.
+rare_flow_threshold: 0.01
+
+# --- Port Scan Threshold ---
+# Number of distinct destination ports a single source must contact within
+# the time window before being classified as a port scan.
+# Default: 10
+port_scan_threshold: 10
+
+# --- Port Scan Window (seconds) ---
+# Time window for port-scan detection.
+# Default: 10
+port_scan_window_seconds: 10
+
+# --- Public Egress Known Good ---
+# Recognised external service names that are known-good egress targets.
+# These suppress "public egress" anomaly alerts.
+public_egress_known_good:
+  - "docker.io"
+  - "ghcr.io"
+  - "gcr.io"
+  - "k8s.gcr.io"
+
+# --- Allowed Namespace Pairs ---
+# Maps a source namespace to its allowed destination namespaces.
+# If empty, the namespace detector emits informational-only anomalies
+# (severity: low) because cluster topology is unknown.
+# Fill this map with cluster-specific pairs, e.g.:
+#   "frontend": ["backend", "monitoring"]
+allowed_namespace_pairs: {}
+
+# --- Per-Namespace Profiles ---
+# Fine-grained per-namespace traffic rules.
+per_namespace_profiles:
+  production:
+    # Patterns always allowed regardless of classification
+    allowed_targets:
+      - "kube-system/kube-dns:53/udp"
+    # Patterns explicitly forbidden
+    disallowed_targets:
+      - "external/untrusted:443/tcp"
+    # Labels required on all pods in this namespace
+    required_labels:
+      - "app"
+      - "version"
+
+# --- Known Good External Endpoints ---
+# Fully-qualified domain names or IPs that are confirmed-good external egress targets.
+# These suppress "public egress" anomaly alerts.
+known_good_external_endpoints:
+  - "pypi.org"
+  - "registry.npmjs.org"
+  - "apt.ubuntu.com"
+
+# --- Public Egress Allowlist CIDRs ---
+# Public (non-RFC-1918) CIDR ranges that are considered benign external traffic.
+# Use with caution — broad ranges like 0.0.0.0/0 will suppress all public egress alerts.
+public_egress_allowlist_cidrs: []
+
+# --- API Server Ingress Ports ---
+# TCP ports that identify kube-apiserver admission-webhook traffic. When a synthetic
+# source (pvt/pub/-) targets a workload on one of these ports, the builder renders
+# the ingress as an apiserver rule (ipBlock: 10.96.0.0/12 by default, or a
+# namespaceSelector for kube-system if APIServerCIDRs is empty).
+# Override this list to add/remove ports cluster-by-cluster. Empty list disables
+# the apiserver sentinel (all synthetic-source ingress is rendered as world).
+# Default: TCP {9443, 8443, 5443, 6443}
+# apiserver_ingress_ports:
+#   - protocol: "TCP"
+#     port: 9443
+#   - protocol: "TCP"
+#     port: 8443
+#   - protocol: "TCP"
+#     port: 5443
+#   - protocol: "TCP"
+#     port: 6443
+
+# --- API Server Egress Ports ---
+# TCP port(s) that identify outbound kube-apiserver egress traffic. When a workload
+# sends traffic (egress) to a destination on one of these ports, the builder renders
+# the egress as an apiserver-egress rule (ipBlock: 10.96.0.0/12 by default, or a
+# namespaceSelector for kube-system if APIServerCIDRs is empty).
+# Override this list to add/remove ports cluster-by-cluster. Empty list disables
+# the egress sentinel (all synthetic-dest egress is rendered as world).
+# Default: TCP {6443}
+# apiserver_egress_ports:
+#   - protocol: "TCP"
+#     port: 6443
+
+# --- Public Services ---
+# Kubernetes services whose ingress is rendered as a single match-all rule
+# (from: 0.0.0.0/0 equivalent) instead of one rule per client. This avoids the
+# 33-rule explosion for kube-dns in multi-tenant clusters and any namespace
+# created after policy generation still gets DNS / metrics-server.
+# Override this list to customise cluster-by-cluster. Empty list disables
+# the match-all shortcut (every peer emits its own ingress rule).
+# Default: kube-dns (53/UDP+TCP) and metrics-server (4443/TCP, 10250/TCP).
+# public_services:
+#   - namespace: "kube-system"
+#     name: "kube-dns"
+#     ports:
+#       - protocol: "UDP"
+#         port: 53
+#       - protocol: "TCP"
+#         port: 53
+#   - namespace: "kube-system"
+#     name: "metrics-server"
+#     ports:
+#       - protocol: "TCP"
+#         port: 4443
+#       - protocol: "TCP"
+#         port: 10250

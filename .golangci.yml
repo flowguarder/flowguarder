@@ -1,0 +1,53 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - staticcheck
+    - unused
+  disable:
+    - errcheck # disable globally; errcheck is re-enabled above
+
+linters-settings:
+  govet:
+    check-shadowing: true
+  staticcheck:
+    checks: ["all", "-ST1000"]
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - govet
+        - staticcheck
+        - unused
+    - path: cmd/
+      linters:
+        - govet
+    # Exclude false positives from generated protobuf code.
+    - path: pb/
+      linters:
+        - govet
+        - staticcheck
+        - unused
+    # Ignore errcheck on deferred Close calls.
+    - path: _test\.go
+      text: "Error return value of"
+      linters:
+        - errcheck
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default

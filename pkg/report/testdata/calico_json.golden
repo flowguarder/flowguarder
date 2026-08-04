@@ -1,0 +1,26 @@
+{
+  "anomalies": [],
+  "patterns": [
+    {
+      "count": 50,
+      "dst": "production/api",
+      "key": "default/worker -> production/api:3000/TCP",
+      "port": 3000,
+      "protocol": "TCP",
+      "src": "default/worker"
+    },
+    {
+      "count": 25,
+      "dst": "production/api",
+      "key": "default/worker -> production/api:8080/TCP",
+      "port": 8080,
+      "protocol": "TCP",
+      "src": "default/worker"
+    }
+  ],
+  "summary": {
+    "anomalies_by_severity": {},
+    "total_anomalies": 0,
+    "total_patterns": 2
+  }
+}

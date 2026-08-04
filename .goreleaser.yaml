@@ -1,0 +1,54 @@
+version: 2
+
+before:
+  hooks:
+    - go mod download
+
+project_name: flowguarder
+
+# out/ to avoid collision with tracked templates in dist/
+dist: out
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/flowguarder
+    binary: flowguarder
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+    ignore:
+      - goos: darwin
+        goarch: amd64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - README.md
+      - LICENSE
+
+release:
+  github:
+    owner: flowguarder
+    name: flowguarder
+  draft: true

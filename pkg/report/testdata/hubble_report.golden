@@ -1,0 +1,23 @@
+=== flowGuarder Analysis Report ===
+
+Summary
+  Total patterns:      4
+  Total anomalies:     2
+  Anomalies by severity:
+    high:      1
+    medium:    1
+
+Patterns
+--------------------------------------------------------------------------------
+Source     Dest       Key                    Port  Proto         Count
+default/frontend production/backend default/frontend -> production/backend:8080/TCP   8080  TCP             150
+default/frontend default/postgres default/frontend -> default/postgres:5432/TCP   5432  TCP              80
+kube-system/coredns production/backend kube-system/coredns -> production/backend:53/UDP     53  UDP             200
+staging/api-gw production/backend staging/api-gw -> production/backend:443/TCP    443  TCP              30
+
+Anomalies
+--------------------------------------------------------------------------------
+  [high  ] portscan        staging/api-gw       Detected scan of 25 ports from staging/api-gw within 10s
+  [medium] rare_flow       default/redis        Unusual traffic pattern detected from default/redis
+
+====================================

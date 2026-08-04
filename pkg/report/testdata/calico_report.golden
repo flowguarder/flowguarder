@@ -1,0 +1,15 @@
+=== flowGuarder Analysis Report ===
+
+Summary
+  Total patterns:      2
+  Total anomalies:     0
+Patterns
+--------------------------------------------------------------------------------
+Source     Dest       Key                    Port  Proto         Count
+default/worker production/api default/worker -> production/api:3000/TCP   3000  TCP              50
+default/worker production/api default/worker -> production/api:8080/TCP   8080  TCP              25
+
+Anomalies
+--------------------------------------------------------------------------------
+
+====================================

@@ -1,0 +1,52 @@
+# Minimalny ruch pod-pod + DNS + egress, idealny do kalibracji flow analyzera
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-server
+  namespace: flowlab
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: demo-server}
+  template:
+    metadata:
+      labels: {app: demo-server}
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports: [{containerPort: 80}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-server
+  namespace: flowlab
+spec:
+  selector: {app: demo-server}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-client
+  namespace: flowlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: demo-client}
+  template:
+    metadata:
+      labels: {app: demo-client}
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:latest
+        command: ["sh", "-c"]
+        args:
+        - |
+          while true; do
+            curl -s -o /dev/null http://demo-server.flowlab.svc.cluster.local/;
+            curl -s -o /dev/null https://cilium.io/ || true;
+            sleep 3;
+          done

@@ -1,0 +1,31 @@
+# Build artifacts
+bin/
+*.exe
+dist/
+!dist/flowguarder.rb
+!dist/flowguarder.yaml
+out/
+/flowguarder
+
+# Test coverage
+coverage.out
+
+# Test artifacts
+policies/
+policies_new/
+tenant1-calico-flows.jsonl
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# .omo internal orchestration state
+.omo/
+
+# macOS
+.DS_Store
