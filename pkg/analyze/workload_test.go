@@ -10,11 +10,11 @@ import (
 func TestResolveWorkload(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		endpoint  flow.Endpoint
-		wantName  string
-		wantKind  WorkloadKind
-		wantNS    string
+		name     string
+		endpoint flow.Endpoint
+		wantName string
+		wantKind WorkloadKind
+		wantNS   string
 	}{
 		{
 			name: "app label resolves name",
@@ -140,6 +140,17 @@ func TestResolveWorkload(t *testing.T) {
 			wantKind: Unknown,
 			wantNS:   "default",
 		},
+		{
+			name: "k8s:app fallback resolves name when plain app absent",
+			endpoint: flow.Endpoint{
+				Namespace: "default",
+				PodName:   "",
+				Labels:    map[string]string{"k8s:app": "demo-client"},
+			},
+			wantName: "demo-client",
+			wantKind: Unknown,
+			wantNS:   "default",
+		},
 	}
 
 	for _, tt := range tests {
@@ -200,12 +211,18 @@ func TestWorkloadNameFromPodName(t *testing.T) {
 		input    string
 		expected string
 	}{
+		// --- Acceptance cases from plan ---
+		{"multi-segment + hash + pod", "local-path-provisioner-7dc846544d-cn4kb", "local-path-provisioner"},
+		{"single-segment + template-hash + pod", "coredns-668d6bf9bc-abcde", "coredns-668d6bf9bc"},
+		{"multi-segment + template-hash + pod", "demo-client-6d5fd48c7d-tnjbp", "demo-client"},
+		{"single-segment only", "single", "single"},
+		{"multi-segment with pod-hash only", "api-gw-pqr55", "api-gw"},
+		// --- Existing: must keep passing ---
 		{"frontend-7d3f9abc", "frontend-7d3f9abc", "frontend"},
-		{"api-gw-pqr55", "api-gw-pqr55", "api-gw"},
-		{"single", "single", "single"},
-		{"a-b-c-d", "a-b-c-d", "a-b"},
 		{"empty", "", ""},
-		{"cache-1", "cache-1", "cache"},
+		// --- Updated expectations (new semantics) ---
+		{"a-b-c-d: no hash suffix, multi-segment preserved", "a-b-c-d", "a-b-c-d"},
+		{"cache-1: plain ordinal is not a template hash", "cache-1", "cache-1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

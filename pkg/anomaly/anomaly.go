@@ -21,21 +21,21 @@ type Pattern = analyze.Pattern
 type Severity string
 
 const (
-	SeverityInfo    Severity = "info"
-	SeverityLow     Severity = "low"
-	SeverityMedium  Severity = "medium"
-	SeverityHigh    Severity = "high"
+	SeverityInfo   Severity = "info"
+	SeverityLow    Severity = "low"
+	SeverityMedium Severity = "medium"
+	SeverityHigh   Severity = "high"
 )
 
 // Anomaly represents a single detected anomaly.
 type Anomaly struct {
-	ID          string            `json:"id"`
-	Type        string            `json:"type"`
-	Severity    Severity          `json:"severity"`
-	Workload    string            `json:"workload"`
-	Description string            `json:"description"`
-	Evidence    map[string]any    `json:"evidence"`
-	DetectedAt  time.Time         `json:"detected_at"`
+	ID          string         `json:"id"`
+	Type        string         `json:"type"`
+	Severity    Severity       `json:"severity"`
+	Workload    string         `json:"workload"`
+	Description string         `json:"description"`
+	Evidence    map[string]any `json:"evidence"`
+	DetectedAt  time.Time      `json:"detected_at"`
 }
 
 // NewAnomaly creates a new Anomaly with a deterministic hash-based ID.
@@ -90,5 +90,3 @@ type Detector interface {
 	// same inputs.
 	Detect(flows []flow.Flow, patterns []Pattern, workloads analyze.Workloads, cfg config.Config) []Anomaly
 }
-
-

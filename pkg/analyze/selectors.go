@@ -9,15 +9,15 @@ import (
 // on pod restart/recreate and must not be baked into persistent NetworkPolicy
 // selectors.
 var unstableLabelKeys = map[string]bool{
-	"pod-template-hash":             true,
-	"controller-revision-hash":      true,
-	"pod-index":                     true,
-	"apps.kubernetes.io/pod-index":  true,
+	"pod-template-hash":                  true,
+	"controller-revision-hash":           true,
+	"pod-index":                          true,
+	"apps.kubernetes.io/pod-index":       true,
 	"statefulset.kubernetes.io/pod-name": true,
-	"controller-uid":                true,
-	"projectcalico.org/namespace":   true,
-	"projectcalico.org/orchestrator": true,
-	"projectcalico.org/serviceaccount": true,
+	"controller-uid":                     true,
+	"projectcalico.org/namespace":        true,
+	"projectcalico.org/orchestrator":     true,
+	"projectcalico.org/serviceaccount":   true,
 }
 
 // stableKeys is the allow-list of label keys that are always kept, regardless
@@ -48,13 +48,13 @@ func isUUID(s string) bool {
 //
 // Stable label keys kept by default:
 //
-//	- app
-//	- app.kubernetes.io/name
-//	- app.kubernetes.io/instance
-//	- app.kubernetes.io/component
-//	- k8s-app
-//	- name
-//	- job-name
+//   - app
+//   - app.kubernetes.io/name
+//   - app.kubernetes.io/instance
+//   - app.kubernetes.io/component
+//   - k8s-app
+//   - name
+//   - job-name
 //
 // In addition to the explicit deny-list, any key matching the prefix
 // "projectcalico.org/" is stripped.
@@ -65,6 +65,34 @@ func StripUnstableLabels(labels map[string]string) map[string]string {
 
 	result := make(map[string]string, len(labels))
 	for k, v := range labels {
+		// Defensive backstop: drop Cilium-internal label keys that would produce
+		// illegal Kubernetes label keys (k8s: prefix with colon) or Cilium-
+		// specific metadata. This check fires BEFORE the stableKeys allow-list
+		// so that even if a Cilium key is accidentally added to stableKeys, it
+		// still gets dropped.
+		//
+		// Case-sensitive prefix matching — Kubernetes label keys must be
+		// lowercase (RFC 1123 subdomain convention). Uppercase variants like
+		// "IO.CILIUM.xyz" are deliberately NOT dropped here; they do not occur
+		// in real Cilium/Hubble output and would need separate justification.
+		if strings.HasPrefix(k, "k8s:") {
+			continue
+		}
+		if strings.HasPrefix(k, "io.cilium.") {
+			continue
+		}
+		if k == "io.kubernetes.pod.namespace" {
+			continue
+		}
+
+		// Drop Cilium identity/reserved label keys (reserved:world, reserved:host,
+		// reserved:kube-apiserver, etc.). These are internal identity labels that
+		// must never appear in Kubernetes NetworkPolicy selectors — they have no
+		// valid DNS-name form and trigger validation warnings.
+		if strings.HasPrefix(k, "reserved:") {
+			continue
+		}
+
 		// Stable keys are always kept — top-level guard.
 		if stableKeys[k] {
 			result[k] = v
@@ -133,11 +161,6 @@ func StripUnstableLabels(labels map[string]string) map[string]string {
 		}
 
 		result[k] = v
-	}
-
-	// Guarantee non-nil when input was non-nil.
-	if result == nil {
-		result = make(map[string]string)
 	}
 	return result
 }

@@ -47,12 +47,12 @@ func MatchFlow(f flow.Flow, policies []policy.Policy) bool {
 
 // CoverageResult holds the outcome of a coverage computation.
 type CoverageResult struct {
-	TotalFlows    int
-	CoveredFlows  int
-	TotalBytes    uint64
-	CoveredBytes  uint64
-	FlowPercent   float64
-	BytePercent   float64
+	TotalFlows   int
+	CoveredFlows int
+	TotalBytes   uint64
+	CoveredBytes uint64
+	FlowPercent  float64
+	BytePercent  float64
 }
 
 // ComputeCoverage tallies how many flows and bytes are covered by the given
@@ -186,5 +186,3 @@ func cidrMatch(selectors []string, targetID string) bool {
 	}
 	return false
 }
-
-func stringsEqual(a, b string) bool { return a == b }

@@ -8,9 +8,9 @@ func TestStripUnstableLabels(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		input   map[string]string
-		want    map[string]string
+		name  string
+		input map[string]string
+		want  map[string]string
 	}{
 		{
 			name:  "nil input returns empty map (not nil)",
@@ -25,22 +25,22 @@ func TestStripUnstableLabels(t *testing.T) {
 		{
 			name: "all stable labels returned unchanged",
 			input: map[string]string{
-				"app":                      "nginx",
-				"app.kubernetes.io/name":   "web",
-				"app.kubernetes.io/instance": "prod",
+				"app":                         "nginx",
+				"app.kubernetes.io/name":      "web",
+				"app.kubernetes.io/instance":  "prod",
 				"app.kubernetes.io/component": "frontend",
-				"k8s-app":                  "metrics",
-				"name":                     "backend",
-				"job-name":                 "backup",
+				"k8s-app":                     "metrics",
+				"name":                        "backend",
+				"job-name":                    "backup",
 			},
 			want: map[string]string{
-				"app":                       "nginx",
-				"app.kubernetes.io/name":    "web",
-				"app.kubernetes.io/instance": "prod",
+				"app":                         "nginx",
+				"app.kubernetes.io/name":      "web",
+				"app.kubernetes.io/instance":  "prod",
 				"app.kubernetes.io/component": "frontend",
-				"k8s-app":                   "metrics",
-				"name":                      "backend",
-				"job-name":                  "backup",
+				"k8s-app":                     "metrics",
+				"name":                        "backend",
+				"job-name":                    "backup",
 			},
 		},
 		{
@@ -96,17 +96,17 @@ func TestStripUnstableLabels(t *testing.T) {
 		{
 			name: "mix of stable and unstable — only stable kept",
 			input: map[string]string{
-				"app":                        "nginx",
-				"app.kubernetes.io/name":     "web",
-				"pod-template-hash":          "d8f3abc1",
-				"controller-revision-hash":   "ds-7b9c",
+				"app":                         "nginx",
+				"app.kubernetes.io/name":      "web",
+				"pod-template-hash":           "d8f3abc1",
+				"controller-revision-hash":    "ds-7b9c",
 				"projectcalico.org/namespace": "kube-system",
-				"k8s-app":                    "kube-dns",
+				"k8s-app":                     "kube-dns",
 			},
 			want: map[string]string{
-				"app":              "nginx",
+				"app":                    "nginx",
 				"app.kubernetes.io/name": "web",
-				"k8s-app":          "kube-dns",
+				"k8s-app":                "kube-dns",
 			},
 		},
 		{
@@ -125,11 +125,11 @@ func TestStripUnstableLabels(t *testing.T) {
 		{
 			name: "knative runai uuid labels stripped",
 			input: map[string]string{
-				"app":                                "redis",
-				"run.ai/workload-id":                 "f8912b5b-1111-2222-3333-444455556666",
-				"serving.knative.dev/revisionUID":     "a1b2c3d4-eeff-0011-2233-445566778899",
-				"pod-template-generation":             "2",
-				"runai-gpu-group":                     "uuid",
+				"app":                             "redis",
+				"run.ai/workload-id":              "f8912b5b-1111-2222-3333-444455556666",
+				"serving.knative.dev/revisionUID": "a1b2c3d4-eeff-0011-2233-445566778899",
+				"pod-template-generation":         "2",
+				"runai-gpu-group":                 "uuid",
 			},
 			want: map[string]string{"app": "redis"},
 		},
@@ -143,9 +143,78 @@ func TestStripUnstableLabels(t *testing.T) {
 			},
 		},
 		{
-			name: "non-stable key with UUID value stripped",
+			name:  "non-stable key with UUID value stripped",
 			input: map[string]string{"custom": "f8912b5b-1111-2222-3333-444455556666"},
-			want: map[string]string{},
+			want:  map[string]string{},
+		},
+
+		// --- Cilium internal-key dropbackstop tests ---
+
+		{
+			name:  "k8s: prefixed key stripped even with stable value",
+			input: map[string]string{"k8s:app": "x"},
+			want:  map[string]string{},
+		},
+		{
+			name:  "io.cilium prefixed key stripped",
+			input: map[string]string{"io.cilium.k8s.policy.cluster": "kind"},
+			want:  map[string]string{},
+		},
+		{
+			name:  "io.kubernetes.pod.namespace stripped",
+			input: map[string]string{"io.kubernetes.pod.namespace": "flowlab"},
+			want:  map[string]string{},
+		},
+		{
+			name: "mixed Cilium and stable keys — only non-Cilium stable kept",
+			input: map[string]string{
+				"k8s:app":                      "demo",
+				"io.cilium.k8s.policy.cluster": "kind",
+				"io.kubernetes.pod.namespace":  "flowlab",
+				"app":                          "demo",
+			},
+			want: map[string]string{"app": "demo"},
+		},
+		{
+			name: "k8s: key with value that looks like UUID still stripped",
+			input: map[string]string{
+				"k8s:workload-id": "e1d2c3b4-aaaa-bbbb-cccc-dddd44444333",
+				"app":             "myapp",
+			},
+			want: map[string]string{"app": "myapp"},
+		},
+		{
+			name:  "k8s-app (dash, no colon) is a stable key and survives",
+			input: map[string]string{"k8s-app": "kube-dns"},
+			want:  map[string]string{"k8s-app": "kube-dns"},
+		},
+		{
+			name:  "uppercase IO.CILIUM.NOT_DROPPED_BY_DESIGN",
+			input: map[string]string{"IO.CILIUM.UPPERCASE": "value"},
+			want:  map[string]string{"IO.CILIUM.UPPERCASE": "value"},
+		},
+
+		// --- reserved:* key drop tests (T9) ---
+
+		{
+			name:  "reserved:world stripped from selectors",
+			input: map[string]string{"reserved:world": "", "app": "proxy"},
+			want:  map[string]string{"app": "proxy"},
+		},
+		{
+			name:  "reserved:host stripped from selectors",
+			input: map[string]string{"reserved:host": ""},
+			want:  map[string]string{},
+		},
+		{
+			name:  "reserved:kube-apiserver stripped from selectors",
+			input: map[string]string{"reserved:kube-apiserver": "", "k8s-app": "dns"},
+			want:  map[string]string{"k8s-app": "dns"},
+		},
+		{
+			name:  "reserved:remote-node stripped",
+			input: map[string]string{"reserved:remote-node": ""},
+			want:  map[string]string{},
 		},
 	}
 

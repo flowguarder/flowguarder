@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
 	observer "github.com/cilium/cilium/api/v1/observer"
 	"github.com/flowguarder/flowguarder/pkg/parser"
-	"log/slog"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -99,10 +98,10 @@ func (c *HubbleGRPCClient) Open(ctx context.Context) (io.ReadCloser, error) {
 
 	var req *observer.GetFlowsRequest
 	if s := c.Since; s != "" {
-		ts, err := parseSince(s)
-		if err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("ingest: HubbleGRPCClient.Open: %w", err)
+		ts, tsErr := parseSince(s)
+		if tsErr != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("ingest: HubbleGRPCClient.Open: %w", tsErr)
 		}
 		req = &observer.GetFlowsRequest{Since: ts}
 	} else {
@@ -111,7 +110,7 @@ func (c *HubbleGRPCClient) Open(ctx context.Context) (io.ReadCloser, error) {
 
 	stream, err := client.GetFlows(ctx, req)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("ingest: HubbleGRPCClient.Open: GetFlows: %w", err)
 	}
 

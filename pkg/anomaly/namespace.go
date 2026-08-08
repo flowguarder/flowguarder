@@ -92,10 +92,10 @@ func (d *NamespaceDetector) Detect(
 	}
 	for pair, g := range seen {
 		evidence := map[string]any{
-			"pair":                 pair,
-			"flow_count":           g.count,
-			"representative_src":   g.RepresentativeWorkload,
-			"allowed_pairs":        cfg.AllowedNamespacePairs,
+			"pair":               pair,
+			"flow_count":         g.count,
+			"representative_src": g.RepresentativeWorkload,
+			"allowed_pairs":      cfg.AllowedNamespacePairs,
 		}
 		if configNote != "" {
 			evidence["config_note"] = configNote
@@ -114,6 +114,6 @@ func (d *NamespaceDetector) Detect(
 }
 
 type nsGroup struct {
-	count               int
+	count                  int
 	RepresentativeWorkload string
 }

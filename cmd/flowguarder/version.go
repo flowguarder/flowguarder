@@ -2,10 +2,13 @@ package main
 
 import "github.com/spf13/cobra"
 
-// Build-time variables set via -ldflags.
+// Build-time variables injected via goreleaser ldflags.
 var (
-	version   = "1.0.0"
-	commit    = "none"
+	version = "1.1.0"
+
+	//nolint:unused // injected via goreleaser ldflags
+	commit = "none"
+	//nolint:unused // injected via goreleaser ldflags
 	buildDate = "unknown"
 )
 

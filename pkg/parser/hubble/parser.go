@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
+
 	"github.com/flowguarder/flowguarder/pkg/flow"
 	"github.com/flowguarder/flowguarder/pkg/parser"
 )
@@ -42,22 +44,22 @@ var protoMap = map[string]flow.Protocol{
 // hubbleFlow is the raw JSON structure for a Hubble flow record.
 // Field tags match the Cilium Hubble --output json format.
 type hubbleFlow struct {
-	Time             string      `json:"time"`
-	Verdict          string      `json:"verdict"`
-	TrafficDirection string    `json:"traffic_direction"`
-	IPVersion        string      `json:"ip_version"`
-	IP               *hubbleIP   `json:"ip,omitempty"`
-	L4               *hubbleLayer4 `json:"l4"`
-	Source           *hubbleEndpoint  `json:"source"`
-	Destination      *hubbleEndpoint  `json:"destination"`
+	Time             string          `json:"time"`
+	Verdict          string          `json:"verdict"`
+	TrafficDirection string          `json:"traffic_direction"`
+	IPVersion        string          `json:"ip_version"`
+	IP               *hubbleIP       `json:"ip,omitempty"`
+	L4               *hubbleLayer4   `json:"l4"`
+	Source           *hubbleEndpoint `json:"source"`
+	Destination      *hubbleEndpoint `json:"destination"`
 	L7               *hubbleL7       `json:"l7"`
 	Hints            *hubbleHints    `json:"hints,omitempty"`
-	Bytes            uint64           `json:"bytes,omitempty"`
-	Packets          uint64           `json:"packets,omitempty"`
-	IsReply          bool             `json:"is_reply,omitempty"`
-	Reply            bool             `json:"reply,omitempty"`
-	DropReason       dropReasonJSON   `json:"drop_reason,omitempty"`
-	PolicyNames      []string         `json:"policy_names,omitempty"`
+	Bytes            uint64          `json:"bytes,omitempty"`
+	Packets          uint64          `json:"packets,omitempty"`
+	IsReply          bool            `json:"is_reply,omitempty"`
+	Reply            bool            `json:"reply,omitempty"`
+	DropReason       dropReasonJSON  `json:"drop_reason,omitempty"`
+	PolicyNames      []string        `json:"policy_names,omitempty"`
 }
 
 // hubbleIP is the top-level IP object in a Hubble flow.
@@ -68,12 +70,12 @@ type hubbleIP struct {
 
 // hubbleLayer4 holds Layer 4 transport details.
 type hubbleLayer4 struct {
-	Protocol  string                  `json:"protocol"`
-	TCP       *hubbleLayer4TCPUDP     `json:"tcp,omitempty"`
-	UDP       *hubbleLayer4TCPUDP     `json:"udp,omitempty"`
-	ICMP      *hubbleLayer4ICMP       `json:"icmp,omitempty"`
-	TCPProto  *hubbleLayer4TCPUDPProto `json:"TCP,omitempty"`
-	UDPProto  *hubbleLayer4TCPUDPProto `json:"UDP,omitempty"`
+	Protocol string                   `json:"protocol"`
+	TCP      *hubbleLayer4TCPUDP      `json:"tcp,omitempty"`
+	UDP      *hubbleLayer4TCPUDP      `json:"udp,omitempty"`
+	ICMP     *hubbleLayer4ICMP        `json:"icmp,omitempty"`
+	TCPProto *hubbleLayer4TCPUDPProto `json:"TCP,omitempty"`
+	UDPProto *hubbleLayer4TCPUDPProto `json:"UDP,omitempty"`
 }
 
 // hubbleLayer4TCPUDP holds port/protocol info for TCP and UDP.
@@ -87,7 +89,9 @@ type hubbleLayer4TCPUDP struct {
 }
 
 // hubbleLayer4TCPUDPProto holds port info in the protojson (flat) shape:
-//   {"source_port": 48312, "destination_port": 8080}
+//
+//	{"source_port": 48312, "destination_port": 8080}
+//
 // emitted by HubbleGRPCClient via protojson.MarshalOptions{UseProtoNames: true}.
 type hubbleLayer4TCPUDPProto struct {
 	SourcePort uint16 `json:"source_port"`
@@ -102,14 +106,14 @@ type hubbleLayer4ICMP struct {
 
 // hubbleEndpoint describes a Hubble endpoint.
 type hubbleEndpoint struct {
-	Namespace  string   `json:"namespace"`
-	PodName    string   `json:"pod_name"`
-	PodNsp     string   `json:"pod_namespace"`
-	Service    string   `json:"service"`
-	Labels     []string `json:"labels"`
-	IPs        []string `json:"IPs"`
-	Name       string   `json:"name"`
-	Workloads  []struct {
+	Namespace string   `json:"namespace"`
+	PodName   string   `json:"pod_name"`
+	PodNsp    string   `json:"pod_namespace"`
+	Service   string   `json:"service"`
+	Labels    []string `json:"labels"`
+	IPs       []string `json:"IPs"`
+	Name      string   `json:"name"`
+	Workloads []struct {
 		Port uint16 `json:"port"`
 	} `json:"workloads,omitempty"`
 }
@@ -143,9 +147,9 @@ type hubbleTLS struct {
 // DNS/HTTP/TLS hints arrive under hints.dns, hints.http, or hints.tls
 // rather than under l7.
 type hubbleHints struct {
-	DNS  *hintsDNS   `json:"dns,omitempty"`
-	HTTP *hintsHTTP  `json:"http,omitempty"`
-	TLS  *hintsTLS   `json:"tls,omitempty"`
+	DNS  *hintsDNS  `json:"dns,omitempty"`
+	HTTP *hintsHTTP `json:"http,omitempty"`
+	TLS  *hintsTLS  `json:"tls,omitempty"`
 }
 
 // dropReasonJSON accepts both a string and a number from the Hubble
@@ -379,10 +383,21 @@ func parseEndpoint(raw *hubbleEndpoint) flow.Endpoint {
 	return ep
 }
 
-// parseLabels splits array of "key=value" strings into a map.
+// parseLabels splits an array of "key=value" strings into a map.
+//
+// Normalization:
+//   - Strips the "k8s:" prefix from label keys (k8s:app→app, k8s:k8s-app→k8s-app).
+//   - Drops Cilium/K8s internal keys after prefix stripping (io.cilium.*, io.kubernetes.pod.namespace).
+//   - Preserves reserved:* bare tokens (e.g. "reserved:host") as map[key]="".
+//   - Bare tokens without "=" that are not reserved:* remain dropped.
+//
+// Collision: when the same key exists both as k8s:prefixed and plain,
+// the plain (non-prefixed) value wins. A debug message is logged when the
+// values differ.
 func parseLabels(labels []string) map[string]string {
 	m := make(map[string]string, len(labels))
 	for _, l := range labels {
+		// Handle bare tokens (no "=").
 		idx := -1
 		for i, c := range l {
 			if c == '=' {
@@ -390,10 +405,41 @@ func parseLabels(labels []string) map[string]string {
 				break
 			}
 		}
-		if idx <= 0 {
-			continue // malformed: "key=value" must have at least "k=v"
+		if idx < 0 {
+			// bare token — preserve reserved:* labels only
+			if strings.HasPrefix(l, "reserved:") {
+				m[l] = ""
+			}
+			continue
 		}
-		m[l[:idx]] = l[idx+1:]
+		if idx <= 0 {
+			continue
+		}
+		key := l[:idx]
+		value := l[idx+1:]
+
+		// Strip the "k8s:" prefix if present.
+		key = strings.TrimPrefix(key, "k8s:")
+
+		// Drop Cilium/K8s internal keys.
+		if key == "io.kubernetes.pod.namespace" ||
+			strings.HasPrefix(key, "io.cilium.") {
+			continue
+		}
+
+		// Collision handling: if a plain (non-k8s-prefixed) key already
+		// exists and the incoming key was originally k8s-prefixed, the
+		// stored (plain) value wins. When the values differ, log a
+		// debug message.
+		origWasPrefixed := idx < len(l) && strings.HasPrefix(l[:idx], "k8s:")
+		if origWasPrefixed {
+			if oldVal, exists := m[key]; exists && oldVal != value {
+				log.Printf("hubble: duplicate label key %q (prefixed=%q vs plain=%q), keeping plain value", key, value, oldVal)
+				continue
+			}
+		}
+
+		m[key] = value
 	}
 	return m
 }

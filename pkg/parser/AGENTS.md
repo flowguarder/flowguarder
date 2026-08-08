@@ -1,6 +1,6 @@
 # PARSER PACKAGE
 
-**Generated:** 2026-07-31
+**Generated:** 2026-07-31 (refreshed 2026-08-07)
 
 ## OVERVIEW
 `pkg/parser/` — flow-log parsing, source auto-detection, and registry-based parser selection for Hubble and Calico input formats.
@@ -13,15 +13,15 @@ pkg/parser/
 ├── parser_test.go   # Tests for detect.go
 ├── detect_test.go   # Tests for detect.go helpers
 ├── hubble/          # Hubble JSON parser (fail-fast on first parse error)
-│   ├── parser.go    # 421 LOC: hubbleFlow structs, field mapping, parseLine
+│   ├── parser.go    # 562 LOC: hubbleFlow structs, field mapping, parseLine
 │   └── parser_test.go
 ├── calico/          # Calico JSON parser (log-and-skip bad lines)
-│   ├── parser.go    # 253 LOC: calicoRecord, mapVerdict/direction/protocol
+│   ├── parser.go    # 265 LOC: calicoRecord, mapVerdict/direction/protocol
 │   ├── parser_test.go
-│   └── syslog.go    # 120 LOC: Calico JSON-in-syslog (extractJSONFromSyslog)
+│   ├── syslog.go    # 120 LOC: Calico JSON-in-syslog (extractJSONFromSyslog)
 │   └── syslog_test.go
 ├── goldmane/          # Calico Goldmane gRPC API parser (log-and-skip on errors)
-│   ├── parser.go    # 294 LOC: FlowResult/FlowKey/Flow JSON structs, mapping
+│   ├── parser.go    # 337 LOC: FlowResult/FlowKey/Flow JSON structs, mapping
 │   └── parser_test.go
 ```
 

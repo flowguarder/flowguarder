@@ -28,7 +28,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "open: %v\n", err)
 		os.Exit(1)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	p, err := parser.SelectParser(parser.SourceHubble, parser.SourceHubble)
 	if err != nil {
@@ -38,7 +38,7 @@ func main() {
 
 	var parsed, invalid int
 	err = p.Parse(r, func(f flow.Flow) error {
-		if err := f.Validate(); err != nil {
+		if vErr := f.Validate(); vErr != nil {
 			invalid++
 			return nil
 		}

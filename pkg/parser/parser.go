@@ -25,7 +25,6 @@ const (
 	// SourceAuto indicates the source should use auto-detection based on data
 	// heuristics at parse time.
 	SourceAuto
-
 )
 
 // FormatError is a structured error returned by parsers when a specific record

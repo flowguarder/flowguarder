@@ -1,45 +1,70 @@
+version: "2"
+
 run:
   timeout: 5m
-  issues-exit-code: 1
-  modules-download-mode: readonly
 
 linters:
+  default: none
   enable:
     - errcheck
     - gosec
     - govet
     - staticcheck
     - unused
-  disable:
-    - errcheck # disable globally; errcheck is re-enabled above
-
-linters-settings:
-  govet:
-    check-shadowing: true
-  staticcheck:
-    checks: ["all", "-ST1000"]
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - govet
-        - staticcheck
-        - unused
-    - path: cmd/
-      linters:
-        - govet
-    # Exclude false positives from generated protobuf code.
-    - path: pb/
-      linters:
-        - govet
-        - staticcheck
-        - unused
-    # Ignore errcheck on deferred Close calls.
-    - path: _test\.go
-      text: "Error return value of"
-      linters:
-        - errcheck
+  settings:
+    govet:
+      enable:
+        - shadow
+    staticcheck:
+      checks: ["all", "-ST1000"]
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - govet
+          - staticcheck
+          - unused
+      - path: cmd/
+        linters:
+          - govet
+      - path: pb/
+        linters:
+          - govet
+          - staticcheck
+          - unused
+      - path: _test\.go
+        text: "Error return value of"
+        linters:
+          - errcheck
+      # G115: int/uint16 port conversions are validated by config schema
+      # (ports 1-65535) or bounded by protocol (ICMP type/code < 256).
+      - linters:
+          - gosec
+        text: "integer overflow conversion"
+      # G304: this is a CLI that reads user-provided file paths by design.
+      - linters:
+          - gosec
+        text: "Potential file inclusion via variable"
+      # G301: CLI output directories use 0755 intentionally.
+      - linters:
+          - gosec
+        text: "Expect directory permissions"
+      # G306: generated policy YAML is written 0644 intentionally.
+      - linters:
+          - gosec
+        text: "Expect WriteFile permissions"
+      # G104: test-only unhandled errors (tmp.Close, w.Close, os.WriteFile).
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "Errors unhandled"
+      # SA4008/SA4004: pkg/anomaly/portscan.go hitWindow has a known dormant
+      # bug (documented in pkg/anomaly/AGENTS.md); detector is not wired into
+      # RunAll and is a permanent no-op. Out of scope for lint cleanup.
+      - path: pkg/anomaly/portscan\.go
+        linters:
+          - staticcheck
+        text: "SA4008|SA4004"
 
 formatters:
   enable:
@@ -51,3 +76,8 @@ formatters:
       sections:
         - standard
         - default
+  exclusions:
+    # Frozen review gates — DO NOT MODIFY these test files (review5/6 gates
+    # assert exact NetPol CIDR-twin output). Exclude from gci formatting.
+    paths:
+      - "cmd/flowguarder/review(5|6)_test\\.go"

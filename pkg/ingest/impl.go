@@ -32,7 +32,7 @@ func (s *FileSource) Open(_ context.Context) (io.ReadCloser, error) {
 	if s.Compression == None {
 		reader, err = maybeGzip(f)
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("ingest: %w", err)
 		}
 	}

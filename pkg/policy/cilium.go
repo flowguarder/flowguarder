@@ -4,11 +4,13 @@ package policy
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
-	"github.com/flowguarder/flowguarder/pkg/config"
+	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/flow"
 	"gopkg.in/yaml.v3"
 )
@@ -19,14 +21,31 @@ import (
 // It mirrors the Cilium CNP schema with Metadata, Spec (endpointSelector,
 // ingress, egress rules, and endpoint Defaults).
 type CiliumNetworkPolicy struct {
-	APIVersion string           `yaml:"apiVersion"`
-	Kind       string           `yaml:"kind"`
-	Metadata   CNPMetadata      `yaml:"metadata"`
-	Spec       CNPSpec          `yaml:"spec"`
+	APIVersion string      `yaml:"apiVersion"`
+	Kind       string      `yaml:"kind"`
+	Metadata   CNPMetadata `yaml:"metadata"`
+	Spec       CNPSpec     `yaml:"spec"`
 }
 
 // CNPHeadComment is an optional comment prepended to each CNP document.
 var CNPHeadComment = "Flowguarder-generated CiliumNetworkPolicy — do not edit manually."
+
+// worldEntities holds the Cilium entity identifiers that together cover all
+// observable traffic sources: external world, in-cluster peers, local hosts,
+// and remote cluster nodes (REVIEW7 BUG 6).
+var worldEntities = []string{"world", "cluster", "host", "remote-node"}
+
+// isWorldPeer checks whether a peer string represents a "world" (match-all)
+// destination.  These values are rendered as Cilium entities instead of the
+// catch-all CIDR 0.0.0.0/0 (REVIEW7 BUG 6).
+// "entity:world" is treated the same — it maps to worldEntities.
+func isWorldPeer(peer string) bool {
+	switch peer {
+	case "0.0.0.0/0", "world", "pub", "pvt", "-", "", "entity:world":
+		return true
+	}
+	return false
+}
 
 // CNPMetadata holds standard Kubernetes metadata for a CNP.
 type CNPMetadata struct {
@@ -38,10 +57,10 @@ type CNPMetadata struct {
 
 // CNPSpec holds the Cilium security policy specification.
 type CNPSpec struct {
-	EndpointSelector  CNPEntitySelector `yaml:"endpointSelector,omitempty"`
-	Ingress           []CNPIngressRule  `yaml:"ingress,omitempty"`
-	Egress            []CNPEgressRule   `yaml:"egress,omitempty"`
-	EndpointDefaults  map[string]bool   `yaml:"endpointDefaults,omitempty"`
+	EndpointSelector CNPEntitySelector `yaml:"endpointSelector,omitempty"`
+	Ingress          []CNPIngressRule  `yaml:"ingress,omitempty"`
+	Egress           []CNPEgressRule   `yaml:"egress,omitempty"`
+	EndpointDefaults map[string]bool   `yaml:"endpointDefaults,omitempty"`
 }
 
 // CNPEntitySelector selects Cilium endpoints by Kubernetes labels.
@@ -51,54 +70,37 @@ type CNPEntitySelector struct {
 
 // CNPIngressRule represents a single ingress security rule.
 type CNPIngressRule struct {
-	FromEndpoints []CNPEntitySelector   `yaml:"fromEndpoints,omitempty"`
-	FromCIDR      []string              `yaml:"fromCIDR,omitempty"`
-	TCP           []PortRule            `yaml:"toPorts,omitempty"`
-	L7Rules       []map[string][]L7Rule `yaml:"l7Rules,omitempty"`
-	Description   string                `yaml:"comment,omitempty"`
+	FromEndpoints []CNPEntitySelector `yaml:"fromEndpoints,omitempty"`
+	FromCIDR      []string            `yaml:"fromCIDR,omitempty"`
+	FromEntities  []string            `yaml:"fromEntities,omitempty"`
+	ToPorts       []CNPToPorts        `yaml:"toPorts,omitempty"`
 }
 
 // CNPEgressRule represents a single egress security rule.
 type CNPEgressRule struct {
-	ToEndpoints []CNPEntitySelector   `yaml:"toEndpoints,omitempty"`
-	ToCIDR      []string              `yaml:"toCIDR,omitempty"`
-	ToFQDNs     []FQDNSelector        `yaml:"toFQDNs,omitempty"`
-	ToServices  []ServiceSelector     `yaml:"toServices,omitempty"`
-	TCP         []PortRule            `yaml:"toPorts,omitempty"`
-	L7Rules     []map[string][]L7Rule `yaml:"l7Rules,omitempty"`
-	Description string                `yaml:"comment,omitempty"`
+	ToEndpoints []CNPEntitySelector `yaml:"toEndpoints,omitempty"`
+	ToCIDR      []string            `yaml:"toCIDR,omitempty"`
+	ToEntities  []string            `yaml:"toEntities,omitempty"`
+	ToFQDNs     []FQDNSelector      `yaml:"toFQDNs,omitempty"`
+	ToServices  []ServiceSelector   `yaml:"toServices,omitempty"`
+	ToPorts     []CNPToPorts        `yaml:"toPorts,omitempty"`
 }
 
-// CNPDefaultCgroup maps endpoint defaults fields.
-type CNPDefaultCgroup struct {
-	// Name is the name of the cgroup.
-	Name string `yaml:"name,omitempty"`
+// CNPToPorts represents a single toPorts entry containing L4 ports and optional L7 rules.
+type CNPToPorts struct {
+	Ports []PortRule `yaml:"ports,omitempty"`
+	Rules *CNPRules  `yaml:"rules,omitempty"`
 }
 
-// CNPDefaultPorts maps port/protocol pairs for endpoint defaults.
-type CNPDefaultPorts struct {
-	// Rules is a slice of port/protocol rules.
-	Rules []PortRule `yaml:"rules,omitempty"`
+// CNPRules holds L7 (application-layer) rules nested inside a toPorts entry.
+type CNPRules struct {
+	DNS []CNPDNSRule `yaml:"dns,omitempty"`
 }
 
-// CNPDefaultEndpoint represents the endpointDefaults stanza.
-type CNPDefaultEndpoint struct {
-	// Cgroups maps endpoint-level cgroup configurations.
-	Cgroups []CNPDefaultCgroup `yaml:"cgroups,omitempty"`
-	// Ports maps endpoint-level port/protocol access.
-	Ports []CNPDefaultPorts `yaml:"ports,omitempty"`
-}
-
-// L7Rule represents an L7 (application-layer) policy rule.
-type L7Rule struct {
-	// DNS matches DNS query patterns.
-	DNS string `yaml:"DNS,omitempty"`
-	// Method is an HTTP method.
-	Method string `yaml:"method,omitempty"`
-	// Path is an HTTP request path.
-	Path string `yaml:"path,omitempty"`
-	// Host is the HTTP Host or TLS SNI.
-	Host string `yaml:"host,omitempty"`
+// CNPDNSRule represents a single DNS rule with match constraints.
+type CNPDNSRule struct {
+	MatchName    string `yaml:"matchName,omitempty"`
+	MatchPattern string `yaml:"matchPattern,omitempty"`
 }
 
 // FQDNSelector selects traffic to fully-qualified domain names.
@@ -131,11 +133,11 @@ type PortRule struct {
 //   - L7 DNS rules when port 53/ANY is observed.
 //   - ToFQDNs rules when flows contain L7 DNS query names or TLS SNI names.
 //
-// apiserverCIDRs is used to expand "apiserver" sentinels in FromWorkloads/ToCIDRs
-// to concrete CIDR ranges.
+// Reserved peers (apiserver, entity:*) are rendered as Cilium entities
+// (fromEntities/toEntities) instead of CIDRs, fixing REVIEW8 BUG 10.
 //
 // Output is deterministic: sorted by CNP metadata.name.
-func BuildCilium(policies []Policy, flows []flow.Flow, apiserverCIDRs []string) []CiliumNetworkPolicy {
+func BuildCilium(policies []Policy, flows []flow.Flow, workloads analyze.Workloads) []CiliumNetworkPolicy {
 	cnps := make([]CiliumNetworkPolicy, 0, len(policies))
 
 	// Collect L7 hints by workload from flows.
@@ -143,7 +145,7 @@ func BuildCilium(policies []Policy, flows []flow.Flow, apiserverCIDRs []string) 
 
 	for i := range policies {
 		p := &policies[i]
-		cnp := buildCNPFromPolicy(p, l7Hints, apiserverCIDRs)
+		cnp := buildCNPFromPolicy(p, l7Hints, workloads)
 		if cnp != nil {
 			cnps = append(cnps, *cnp)
 		}
@@ -200,22 +202,53 @@ type L7HintData struct {
 	Type  string
 }
 
+// normalizeProtocol returns "ANY" for empty or already-ANY input;
+// otherwise returns the input protocol unchanged.
+func normalizeProtocol(proto string) string {
+	if proto == "" || proto == "ANY" {
+		return "ANY"
+	}
+	return proto
+}
+
+// appendDNSRule appends rule to entry.Rules.DNS only if no identical rule
+// (same MatchPattern + MatchName) is already present, preventing duplicate
+// wildcard DNS entries in the same toPorts block.
+func appendDNSRule(entry *CNPToPorts, rule CNPDNSRule) {
+	if entry.Rules == nil {
+		entry.Rules = &CNPRules{}
+	}
+	for _, existing := range entry.Rules.DNS {
+		if existing.MatchPattern == rule.MatchPattern && existing.MatchName == rule.MatchName {
+			return
+		}
+	}
+	entry.Rules.DNS = append(entry.Rules.DNS, rule)
+}
+
 // buildCNPFromPolicy converts a single Policy into a CiliumNetworkPolicy.
-func buildCNPFromPolicy(p *Policy, l7Hints map[string][]L7HintData, apiserverCIDRs []string) *CiliumNetworkPolicy {
-	// Build endpoint selector from workload labels.
+func buildCNPFromPolicy(p *Policy, l7Hints map[string][]L7HintData, workloads analyze.Workloads) *CiliumNetworkPolicy {
+	// Build endpoint selector from workload's stable labels,
+	// falling back to {"app": WorkloadName} for unknown/label-less workloads.
 	endpointLabels := map[string]string{
 		"app": p.WorkloadName,
+	}
+	if wd, ok := workloads[analyze.WorkloadID(p.WorkloadID)]; ok {
+		stable := analyze.StripUnstableLabels(analyze.ResolveSelectors(wd))
+		if len(stable) > 0 {
+			endpointLabels = stable
+		}
 	}
 
 	cnp := &CiliumNetworkPolicy{
 		APIVersion: "cilium.io/v2",
 		Kind:       "CiliumNetworkPolicy",
 		Metadata: CNPMetadata{
-			Name:      "policy-" + sanitizeName(p.WorkloadName),
+			Name:      sanitizeName(p.WorkloadName),
 			Namespace: p.WorkloadNamespace,
 			Labels: map[string]string{
-				"app":         p.WorkloadName,
-				"policy.k8s.io/name":  "flowguarder",
+				"app":                p.WorkloadName,
+				"policy.k8s.io/name": "flowguarder",
 			},
 			Annotations: map[string]string{
 				"flowguarder.io/workload": p.WorkloadID,
@@ -230,58 +263,54 @@ func buildCNPFromPolicy(p *Policy, l7Hints map[string][]L7HintData, apiserverCID
 
 	// Ingress rules.
 	for _, ir := range p.IngressRules {
-		rule := CNPIngressRule{
-			Description: ir.Description,
-		}
+		rule := CNPIngressRule{}
 
-		// FromEndpoints from workload selectors.
-		for _, wl := range ir.FromWorkloads {
-			if wl == "apiserver" {
-				// Expand apiserver sentinel to fromCIDR using config CIDRs.
-				if len(apiserverCIDRs) > 0 {
-					rule.FromCIDR = append(rule.FromCIDR, apiserverCIDRs...)
-				} else {
-					rule.FromCIDR = append(rule.FromCIDR, config.DefaultAPIServerCIDRsStrings...)
-				}
-				continue
+		// FromEndpoints / FromEntities / FromCIDR from workload selectors.
+		if len(ir.FromEntities) > 0 {
+			// Entity sentinel path: expand via resolveEntitySet and SKIP FromWorkloads entirely.
+			for _, ent := range ir.FromEntities {
+				rule.FromEntities = append(rule.FromEntities, resolveEntitySet(ent)...)
 			}
-			if sel := parseWorkloadSelector(wl); sel != nil {
-				rule.FromEndpoints = append(rule.FromEndpoints, *sel)
+			rule.FromEntities = dedupSorted(rule.FromEntities)
+		} else {
+			for _, wl := range ir.FromWorkloads {
+				// 1. isWorldPeer first (catches "world" AND "entity:world") → worldEntities.
+				if isWorldPeer(wl) {
+					rule.FromEntities = append(rule.FromEntities, worldEntities...)
+					continue
+				}
+				// 2. "entity:" prefix → split on `,`, dedup, sort → FromEntities.
+				if strings.HasPrefix(wl, "entity:") {
+					labels := strings.Split(wl[len("entity:"):], ",")
+					// dedup + sort
+					normalized := dedupSorted(labels)
+					rule.FromEntities = append(rule.FromEntities, normalized...)
+					continue
+				}
+				// 3. "apiserver" → explicit entity list.
+				if wl == "apiserver" {
+					rule.FromEntities = append(rule.FromEntities, "kube-apiserver", "host", "remote-node")
+					continue
+				}
+				// 4. CIDR guard → FromCIDR.
+				if _, _, err := net.ParseCIDR(wl); err == nil {
+					rule.FromCIDR = append(rule.FromCIDR, wl)
+					continue
+				}
+				// 5. workload selector → FromEndpoints.
+				if sel := parseWorkloadSelector(wl, p.WorkloadNamespace, workloads); sel != nil {
+					rule.FromEndpoints = append(rule.FromEndpoints, *sel)
+				}
 			}
 		}
 
 		// ToPorts.
 		for _, ps := range ir.Ports {
-			rule.TCP = append(rule.TCP, PortRule{
-				Port:     itoa(int(ps.Port)),
-				Protocol: string(flow.ANY_P), // match any protocol
-			})
-			if ps.Protocol == string(flow.TCP) {
-				rule.TCP = append(rule.TCP, PortRule{
-					Port:     itoa(int(ps.Port)),
-					Protocol: string(flow.TCP),
-				})
-			} else if ps.Protocol == string(flow.UDP) {
-				rule.TCP = append(rule.TCP, PortRule{
-					Port:     itoa(int(ps.Port)),
-					Protocol: string(flow.UDP),
-				})
+			proto := normalizeProtocol(string(ps.Protocol))
+			entry := CNPToPorts{
+				Ports: []PortRule{{Port: itoa(int(ps.Port)), Protocol: proto}},
 			}
-			rule.TCP = dedupPortRules(rule.TCP)
-
-			// L7 DNS rule for port 53.
-			if ps.Port == 53 {
-				rule.L7Rules = append(rule.L7Rules, map[string][]L7Rule{
-					"DNS": {
-						{DNS: "*"}, // allow all DNS queries to this port
-					},
-				})
-			}
-		}
-
-		// Append egress-level L7 hints for ingress destination workload.
-		if hints, ok := l7Hints[p.WorkloadID]; ok {
-			rule.L7Rules = dedupL7Rules(rule.L7Rules, hints)
+			rule.ToPorts = append(rule.ToPorts, entry)
 		}
 
 		cnp.Spec.Ingress = append(cnp.Spec.Ingress, rule)
@@ -289,26 +318,58 @@ func buildCNPFromPolicy(p *Policy, l7Hints map[string][]L7HintData, apiserverCID
 
 	// Egress rules.
 	for _, er := range p.EgressRules {
-		rule := CNPEgressRule{
-			Description: er.Description,
-		}
+		rule := CNPEgressRule{}
 
-		// ToEndpoints.
-		for _, wl := range er.ToWorkloads {
-			if sel := parseWorkloadSelector(wl); sel != nil {
-				rule.ToEndpoints = append(rule.ToEndpoints, *sel)
+		// ToEndpoints / ToEntities / ToCIDR.
+		if len(er.ToEntities) > 0 {
+			// Entity sentinel path: expand via resolveEntitySet and SKIP ToWorkloads + ToCIDRs entirely.
+			for _, ent := range er.ToEntities {
+				rule.ToEntities = append(rule.ToEntities, resolveEntitySet(ent)...)
 			}
-		}
-
-		// ToCIDRs for world egress, expanding "apiserver" sentinel.
-		for _, cidr := range er.ToCIDRs {
-			if cidr == "apiserver" {
-				if len(apiserverCIDRs) > 0 {
-					rule.ToCIDR = append(rule.ToCIDR, apiserverCIDRs...)
-				} else {
-					rule.ToCIDR = append(rule.ToCIDR, config.DefaultAPIServerCIDRsStrings...)
+			rule.ToEntities = dedupSorted(rule.ToEntities)
+		} else {
+			// ToEndpoints / ToCIDR from ToWorkloads.
+			for _, wl := range er.ToWorkloads {
+				// 1. CIDR guard → ToCIDR (must come before parseWorkloadSelector).
+				if _, _, err := net.ParseCIDR(wl); err == nil {
+					rule.ToCIDR = append(rule.ToCIDR, wl)
+					continue
 				}
-			} else {
+				// 2. workload selector → ToEndpoints.
+				if sel := parseWorkloadSelector(wl, p.WorkloadNamespace, workloads); sel != nil {
+					rule.ToEndpoints = append(rule.ToEndpoints, *sel)
+				}
+			}
+
+			// ToNamespaces: append a ToEndpoints peer per namespace.
+			for _, ns := range er.ToNamespaces {
+				if ns != "" {
+					rule.ToEndpoints = append(rule.ToEndpoints, CNPEntitySelector{
+						MatchLabels: map[string]string{"k8s:io.kubernetes.pod.namespace": ns},
+					})
+				}
+			}
+
+			// ToEntities / ToCIDR from ToCIDRs.
+			for _, cidr := range er.ToCIDRs {
+				// 1. isWorldPeer first (catches "world" AND "entity:world") → worldEntities.
+				if isWorldPeer(cidr) {
+					rule.ToEntities = append(rule.ToEntities, worldEntities...)
+					continue
+				}
+				// 2. "entity:" prefix → split on `,`, dedup, sort → ToEntities.
+				if strings.HasPrefix(cidr, "entity:") {
+					labels := strings.Split(cidr[len("entity:"):], ",")
+					normalized := dedupSorted(labels)
+					rule.ToEntities = append(rule.ToEntities, normalized...)
+					continue
+				}
+				// 3. "apiserver" → explicit entity list (kube-apiserver, host, remote-node).
+				if cidr == "apiserver" {
+					rule.ToEntities = append(rule.ToEntities, "kube-apiserver", "host", "remote-node")
+					continue
+				}
+				// 4. Fallback: emit as ToCIDR.
 				rule.ToCIDR = append(rule.ToCIDR, cidr)
 			}
 		}
@@ -336,36 +397,14 @@ func buildCNPFromPolicy(p *Policy, l7Hints map[string][]L7HintData, apiserverCID
 
 		// ToPorts for workload egress.
 		for _, ps := range er.ToPorts {
-			rule.TCP = append(rule.TCP, PortRule{
-				Port:     itoa(int(ps.Port)),
-				Protocol: string(flow.ANY_P), // match any
-			})
-			if ps.Protocol == string(flow.TCP) {
-				rule.TCP = append(rule.TCP, PortRule{
-					Port:     itoa(int(ps.Port)),
-					Protocol: string(flow.TCP),
-				})
-			} else if ps.Protocol == string(flow.UDP) {
-				rule.TCP = append(rule.TCP, PortRule{
-					Port:     itoa(int(ps.Port)),
-					Protocol: string(flow.UDP),
-				})
+			proto := normalizeProtocol(string(ps.Protocol))
+			entry := CNPToPorts{
+				Ports: []PortRule{{Port: itoa(int(ps.Port)), Protocol: proto}},
 			}
-			rule.TCP = dedupPortRules(rule.TCP)
-
-			// L7 DNS for egress port 53.
 			if ps.Port == 53 {
-				rule.L7Rules = append(rule.L7Rules, map[string][]L7Rule{
-					"DNS": {
-						{DNS: "*"},
-					},
-				})
+				appendDNSRule(&entry, CNPDNSRule{MatchPattern: "*"})
 			}
-		}
-
-		// Append FQDN L7 hints for this workload.
-		if hints, ok := l7Hints[p.WorkloadID]; ok {
-			rule.L7Rules = dedupL7Rules(rule.L7Rules, hints)
+			rule.ToPorts = append(rule.ToPorts, entry)
 		}
 
 		cnp.Spec.Egress = append(cnp.Spec.Egress, rule)
@@ -382,93 +421,94 @@ func buildCNPFromPolicy(p *Policy, l7Hints map[string][]L7HintData, apiserverCID
 	return cnp
 }
 
-// findHintsForPort returns L7 hints relevant to a specific port for a direction.
-func findHintsForPort(p *Policy, port uint16, dir flow.Direction) []L7HintData {
-	// For port 53, return DNS-related hints for this workload.
-	if dir == flow.Ingress {
-		// We look up via l7Hints in BuildCilium; for now return nil.
-		return nil
-	}
-	return []L7HintData{}
-}
-
 // findEgressHints returns L7 hints for egress FQDN generation.
 func findEgressHints(p *Policy, allHints map[string][]L7HintData) []L7HintData {
 	return allHints[p.WorkloadID]
 }
 
 // parseWorkloadSelector parses a workload identifier into a CNP entity selector.
-func parseWorkloadSelector(sel string) *CNPEntitySelector {
-	// Check if it's a label selector (key=value format).
-	if contains(sel, "=") {
-		parts := splitN(sel, "=", 2)
-		return &CNPEntitySelector{
-			MatchLabels: map[string]string{
-				parts[0]: parts[1],
-			},
+// Supported formats:
+//   - Comma-separated segments (srcSelectorFor format from builder.go):
+//     "ns/name,label1=v1,label2=v2"
+//   - "key=value"      → MatchLabels={key:value}
+//   - "namespace/name" → resolves to workload's stable labels (via workloads map),
+//     falls back to {"app": name} when unknown or label-less.
+//   - "name"           → MatchLabels={"app": name}
+//
+// When peerNs (from the workload or segment) differs from policyNs,
+// the explicit key "k8s:io.kubernetes.pod.namespace" is injected so
+// that Cilium namespaced CNP fromEndpoints/toEndpoints match endpoints
+// across namespaces (REVIEW7 BUG 5).
+func parseWorkloadSelector(sel, policyNs string, workloads analyze.Workloads) *CNPEntitySelector {
+	labels := make(map[string]string)
+	for _, seg := range strings.Split(sel, ",") {
+		trimmed := strings.TrimSpace(seg)
+		if trimmed == "" {
+			continue
 		}
-	}
-	// Plain workload ID - resolve to name label.
-	idx := index(sel, "/")
-	if idx >= 0 {
-		sel = sel[idx+1:]
-	}
-	return &CNPEntitySelector{
-		MatchLabels: map[string]string{
-			"app": sel,
-		},
-	}
-}
-
-// dedupPortRules removes duplicate PortRule entries.
-func dedupPortRules(rules []PortRule) []PortRule {
-	seen := make(map[string]bool)
-	var out []PortRule
-	for _, r := range rules {
-		key := r.Port + "/" + r.Protocol
-		if !seen[key] {
-			seen[key] = true
-			out = append(out, r)
+		// key=value label segment (explicit segments win over workload labels).
+		if eq := strings.IndexByte(trimmed, '='); eq > 0 {
+			key, value := trimmed[:eq], trimmed[eq+1:]
+			if key != "" {
+				labels[key] = value
+			}
+			continue
 		}
-	}
-	return out
-}
-
-// dedupL7Rules merges L7 rule maps from multiple hints.
-func dedupL7Rules(existing []map[string][]L7Rule, hints []L7HintData) []map[string][]L7Rule {
-	// Merge DNS L7 rules from hints.
-	dnsRules := make(map[string]bool)
-	tlsRules := make(map[string]bool)
-
-	for _, h := range hints {
-		if h.Type == "dns" && h.Query != "" && !dnsRules[h.Query] {
-			dnsRules[h.Query] = true
-		}
-		if h.Type == "tls" && h.Host != "" && !tlsRules[h.Host] {
-			tlsRules[h.Host] = true
-		}
-	}
-
-	for _, m := range existing {
-		if rules, ok := m["DNS"]; ok {
-			for _, r := range rules {
-				if r.DNS == "*" {
-					// Full wildcard - already covers DNS.
-					return existing
+		// namespace/name segment – resolve stable labels from workloads when known.
+		if slash := strings.IndexByte(trimmed, '/'); slash > 0 {
+			ns, name := trimmed[:slash], trimmed[slash+1:]
+			if ns != "" && name != "" {
+				var peerNs string
+				var foundWorkload bool
+				if workloads != nil {
+					if wd, ok := workloads[analyze.WorkloadID(ns+"/"+name)]; ok {
+						stable := analyze.StripUnstableLabels(analyze.ResolveSelectors(wd))
+						for k, v := range stable {
+							if _, exists := labels[k]; !exists {
+								labels[k] = v
+							}
+						}
+						if len(stable) > 0 {
+							peerNs = wd.Namespace
+							foundWorkload = true
+						}
+					}
 				}
+				// Cross-namespace label injection (REVIEW7 BUG 5):
+				// inject explicit namespace key whenever peer differs from policy ns.
+				if _, exists := labels["k8s:io.kubernetes.pod.namespace"]; !exists {
+					if peerNs != "" && peerNs != policyNs {
+						labels["k8s:io.kubernetes.pod.namespace"] = peerNs
+					}
+				}
+				// zero stable labels / unknown → fall through to set app:name
+				// and re-resolve peerNs from segment.
+				if !foundWorkload {
+					if peerNs == "" {
+						peerNs = ns
+					}
+					if _, exists := labels["app"]; !exists {
+						labels["app"] = name
+					}
+					// Re-inject namespace key for unknown-workload path (peerNs derived from segment).
+					if _, exists := labels["k8s:io.kubernetes.pod.namespace"]; !exists {
+						if peerNs != "" && peerNs != policyNs {
+							labels["k8s:io.kubernetes.pod.namespace"] = peerNs
+						}
+					}
+				}
+				continue
 			}
 		}
+		// Bare name.
+		if _, exists := labels["app"]; !exists {
+			labels["app"] = trimmed
+		}
 	}
-
-	// Add new L7 rules.
-	var merged []map[string][]L7Rule
-
-	// Keep existing non-wildcard DNS rules.
-	for _, m := range existing {
-		merged = append(merged, m)
+	if len(labels) == 0 {
+		return &CNPEntitySelector{MatchLabels: map[string]string{"app": sel}}
 	}
-
-	return merged
+	return &CNPEntitySelector{MatchLabels: labels}
 }
 
 // dedupStrings returns a deduplicated, sorted copy of a string slice.
@@ -483,6 +523,62 @@ func dedupStrings(s []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// dedupSorted returns a deduplicated, sorted copy of a string slice.
+// Used for entity: label lists from the sentinel contract.
+func dedupSorted(s []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, item := range s {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" && !seen[trimmed] {
+			seen[trimmed] = true
+			out = append(out, trimmed)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// resolveEntitySet expands an "entity:<list>" sentinel into the Cilium entity
+// names to emit as fromEntities/toEntities, applying the node-family closure:
+// reserved host/remote-node peers always render as BOTH host AND remote-node
+// (REVIEW8 §3); "world" expands to worldEntities (world, cluster, host,
+// remote-node). Deterministic: sorted + deduped.
+func resolveEntitySet(ent string) []string {
+	if !strings.HasPrefix(ent, "entity:") {
+		return nil
+	}
+	labels := strings.Split(ent[len("entity:"):], ",")
+	normalized := dedupSorted(labels)
+
+	var out []string
+	hasWorld := false
+	hasHost := false
+	hasRemoteNode := false
+
+	for _, l := range normalized {
+		switch l {
+		case "world":
+			hasWorld = true
+		case "host":
+			hasHost = true
+		case "remote-node":
+			hasRemoteNode = true
+		default:
+			out = append(out, l)
+		}
+	}
+
+	if hasWorld {
+		out = append(out, worldEntities...)
+	}
+	if hasHost || hasRemoteNode {
+		out = append(out, "host", "remote-node")
+	}
+
+	return dedupSorted(out)
 }
 
 // WriteCiliumYAML writes a list of CiliumNetworkPolicy objects to a directory
@@ -503,7 +599,7 @@ func WriteCiliumYAML(cnps []CiliumNetworkPolicy, dir string) error {
 			return fmt.Errorf("marshal cnp %q: %w", cnp.Metadata.Name, err)
 		}
 
-		fname := "policy-" + sanitizeName(cnp.Metadata.Name) + ".yaml"
+		fname := sanitizeName(cnp.Metadata.Namespace) + "-" + sanitizeName(cnp.Metadata.Name) + ".yaml"
 		fpath := filepath.Join(dir, fname)
 		if err := os.WriteFile(fpath, data, 0644); err != nil {
 			return fmt.Errorf("write cnp file %q: %w", fname, err)
@@ -578,58 +674,4 @@ func sanitizeName(s string) string {
 		result = "a" + result
 	}
 	return result
-}
-
-// Helper string functions to avoid stdlib import.
-
-func contains(s, substr string) bool {
-	return index(s, substr) >= 0
-}
-
-func index(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-func splitN(s, sep string, n int) []string {
-	if n <= 0 {
-		return nil
-	}
-	var parts []string
-	for i := 0; i < len(s); {
-		idx := index(s[i:], sep)
-		if idx < 0 {
-			parts = append(parts, s[i:])
-			break
-		}
-		parts = append(parts, s[i:i+idx])
-		if len(parts) >= n-1 {
-			parts = append(parts, s[i+idx+len(sep):])
-			break
-		}
-		i = i + idx + len(sep)
-	}
-	if len(parts) == 0 {
-		return []string{s}
-	}
-	return parts
-}
-
-// itoa converts a uint16 to string (reused from builder.go).
-var itoa16 = func(val uint16) string {
-	if val == 0 {
-		return "0"
-	}
-	var buf [6]byte
-	n := len(buf)
-	for val > 0 {
-		n--
-		buf[n] = byte('0' + val%10)
-		val /= 10
-	}
-	return string(buf[n:])
 }

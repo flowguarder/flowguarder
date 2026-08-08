@@ -169,7 +169,7 @@ func TestRenderJSON_AnomalySeveritySorted(t *testing.T) {
 func buildHubbleJSONReport() JSONReport {
 	return JSONReport{
 		Summary: Summary{
-			TotalPatterns: 4,
+			TotalPatterns:  4,
 			TotalAnomalies: 2,
 			AnomaliesBySeverity: map[string]int{
 				"high":   1,
@@ -192,8 +192,8 @@ func buildHubbleJSONReport() JSONReport {
 func buildCalicoJSONReport() JSONReport {
 	return JSONReport{
 		Summary: Summary{
-			TotalPatterns:        2,
-			TotalAnomalies:       0,
+			TotalPatterns:       2,
+			TotalAnomalies:      0,
 			AnomaliesBySeverity: map[string]int{},
 		},
 		Patterns: []JSONPattern{

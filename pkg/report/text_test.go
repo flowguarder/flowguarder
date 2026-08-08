@@ -78,7 +78,7 @@ func TestRenderText_Severities(t *testing.T) {
 	t.Parallel()
 	r := TextReport{
 		Summary: Summary{
-			TotalPatterns: 2,
+			TotalPatterns:  2,
 			TotalAnomalies: 3,
 			AnomaliesBySeverity: map[string]int{
 				"high":   1,
@@ -111,7 +111,7 @@ func TestRenderText_Severities(t *testing.T) {
 func buildHubbleTextReport() TextReport {
 	return TextReport{
 		Summary: Summary{
-			TotalPatterns: 4,
+			TotalPatterns:  4,
 			TotalAnomalies: 2,
 			AnomaliesBySeverity: map[string]int{
 				"high":   1,
@@ -134,8 +134,8 @@ func buildHubbleTextReport() TextReport {
 func buildCalicoTextReport() TextReport {
 	return TextReport{
 		Summary: Summary{
-			TotalPatterns: 2,
-			TotalAnomalies: 0,
+			TotalPatterns:       2,
+			TotalAnomalies:      0,
 			AnomaliesBySeverity: map[string]int{},
 		},
 		Patterns: []TextPattern{
@@ -151,9 +151,9 @@ func TestTextReport_SortedSeverityKeys(t *testing.T) {
 	r := TextReport{
 		Summary: Summary{
 			AnomaliesBySeverity: map[string]int{
-				"info":  1,
-				"low":   1,
-				"high":  2,
+				"info":   1,
+				"low":    1,
+				"high":   2,
 				"medium": 1,
 			},
 		},

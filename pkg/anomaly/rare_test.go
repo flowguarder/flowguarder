@@ -4,11 +4,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/config"
 	"github.com/flowguarder/flowguarder/pkg/flow"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRareFlowDetector(t *testing.T) {
@@ -52,12 +51,12 @@ func TestRareFlowDetector(t *testing.T) {
 			name: "count>=10 not flagged regardless of ratio",
 			patterns: []Pattern{
 				{
-					SrcWorkloadID:  "ns/app",
-					DstWorkloadID:  "ns/api",
-					Port:           8080,
-					Protocol:       "TCP",
-					Count:          10, // >= 10
-					Bytes:          200,
+					SrcWorkloadID: "ns/app",
+					DstWorkloadID: "ns/api",
+					Port:          8080,
+					Protocol:      "TCP",
+					Count:         10, // >= 10
+					Bytes:         200,
 				},
 			},
 			expectCount: 0,
@@ -68,12 +67,12 @@ func TestRareFlowDetector(t *testing.T) {
 				p := make([]Pattern, 0, 25)
 				for i := 0; i < 25; i++ {
 					p = append(p, Pattern{
-						SrcWorkloadID:  "scraper/scrape-bot",
-						DstWorkloadID:  "ns/service",
-						Port:           80 + uint16(i),
-						Protocol:       "TCP",
-						Count:          1,
-						Bytes:          10,
+						SrcWorkloadID: "scraper/scrape-bot",
+						DstWorkloadID: "ns/service",
+						Port:          80 + uint16(i),
+						Protocol:      "TCP",
+						Count:         1,
+						Bytes:         10,
 					})
 				}
 				return p
@@ -86,12 +85,12 @@ func TestRareFlowDetector(t *testing.T) {
 				p := make([]Pattern, 0, 120)
 				for i := 0; i < 20; i++ {
 					p = append(p, Pattern{
-						SrcWorkloadID:  "ns/app",
-						DstWorkloadID:  "ns/service",
-						Port:           80 + uint16(i),
-						Protocol:       "TCP",
-						Count:          1,
-						Bytes:          10,
+						SrcWorkloadID: "ns/app",
+						DstWorkloadID: "ns/service",
+						Port:          80 + uint16(i),
+						Protocol:      "TCP",
+						Count:         1,
+						Bytes:         10,
 					})
 				}
 				// Add 100 high-count filler patterns from other workloads so ratios drop below 0.001.

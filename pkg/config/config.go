@@ -95,9 +95,16 @@ type PortSpec struct {
 // PublicServiceSpec describes a Kubernetes service whose traffic should be
 // classified as public egress.
 type PublicServiceSpec struct {
-	Namespace string       `yaml:"namespace,omitempty"`
-	Name      string       `yaml:"name,omitempty"`
-	Ports     []PortSpec   `yaml:"ports,omitempty"`
+	Namespace        string     `yaml:"namespace,omitempty"`
+	Name             string     `yaml:"name,omitempty"`
+	Ports            []PortSpec `yaml:"ports,omitempty"`
+	EgressPorts      []PortSpec `yaml:"egress_ports,omitempty"`
+	EgressAllowWorld bool       `yaml:"egress_allow_world,omitempty"`
+}
+
+type WorkloadSelector struct {
+	Namespace string `yaml:"namespace,omitempty"`
+	Name      string `yaml:"name,omitempty"`
 }
 
 // Config holds all tunable parameters for flow analysis.
@@ -145,6 +152,15 @@ type Config struct {
 	// PublicServices lists Kubernetes services whose traffic should be
 	// classified as public egress.
 	PublicServices []PublicServiceSpec `yaml:"public_services,omitempty"`
+	// ApiserverWorkloadSelector identifies the workload that should be treated as
+	// kube-apiserver for apiserver-port override. When nil, only reserved:kube-apiserver
+	// peers trigger the override.
+	ApiserverWorkloadSelector *WorkloadSelector `yaml:"apiserver_workload_selector,omitempty"`
+	// NodeCIDRs are optional IP ranges covering cluster nodes. When set, NetworkPolicy
+	// renders these alongside inferred /32 node IPs for apiserver rules.
+	NodeCIDRs []string `yaml:"node_cidrs,omitempty"`
+	// AlwaysAllowDNS is true when DNS traffic to kube-dns is always allowed.
+	AlwaysAllowDNS bool `yaml:"always_allow_dns,omitempty"`
 }
 
 // Default returns a Config populated with built-in defaults.
@@ -153,22 +169,25 @@ func Default() Config {
 	clusterCIDRs, _ := cidrStringsToIPNet(DefaultClusterCIDRsStrings, "cluster_cidrs")
 	apiserverCIDRs, _ := cidrStringsToIPNet(DefaultAPIServerCIDRsStrings, "apiserver_cidrs")
 	c := Config{
-		ClusterCIDRs:                 clusterCIDRs,
-		APIServerCIDRs:               apiserverCIDRs,
-		ExcludedNamespaces:           make([]string, len(DefaultExcludedNamespaces)),
-		KubeDNSPorts:                 make([]PortSpec, len(DefaultKubeDNSPorts)),
-		RareFlowThreshold:            defaultRareFlowThreshold,
-		PortScanThreshold:            defaultPortScanThreshold,
-		PortScanWindowSeconds:        defaultPortScanWindowSeconds,
-		AsymmetricRatio:              defaultAsymmetricRatio,
-		AllowedNamespacePairs:        make(map[string][]string),
-		PerNamespaceProfiles:         make(map[string]Profile),
-		PublicEgressKnownGood:        []string{},
-		KnownGoodExternalEndpoints:   []string{},
-		PublicEgressAllowlistCIDRs:   []*net.IPNet{},
-		ApiserverIngressPorts:     make([]PortSpec, len(DefaultApiserverIngressPorts)),
-		ApiserverEgressPorts:      make([]PortSpec, len(DefaultApiserverEgressPorts)),
-		PublicServices:               make([]PublicServiceSpec, len(DefaultPublicServices)),
+		ClusterCIDRs:               clusterCIDRs,
+		APIServerCIDRs:             apiserverCIDRs,
+		ExcludedNamespaces:         make([]string, len(DefaultExcludedNamespaces)),
+		KubeDNSPorts:               make([]PortSpec, len(DefaultKubeDNSPorts)),
+		RareFlowThreshold:          defaultRareFlowThreshold,
+		PortScanThreshold:          defaultPortScanThreshold,
+		PortScanWindowSeconds:      defaultPortScanWindowSeconds,
+		AsymmetricRatio:            defaultAsymmetricRatio,
+		AllowedNamespacePairs:      make(map[string][]string),
+		PerNamespaceProfiles:       make(map[string]Profile),
+		PublicEgressKnownGood:      []string{},
+		KnownGoodExternalEndpoints: []string{},
+		PublicEgressAllowlistCIDRs: []*net.IPNet{},
+		ApiserverIngressPorts:      make([]PortSpec, len(DefaultApiserverIngressPorts)),
+		ApiserverEgressPorts:       make([]PortSpec, len(DefaultApiserverEgressPorts)),
+		PublicServices:             make([]PublicServiceSpec, len(DefaultPublicServices)),
+		ApiserverWorkloadSelector:  &WorkloadSelector{Namespace: "kube-system", Name: "kube-apiserver"},
+		NodeCIDRs:                  []string{},
+		AlwaysAllowDNS:             true,
 	}
 	copy(c.ExcludedNamespaces, DefaultExcludedNamespaces)
 	copy(c.KubeDNSPorts, DefaultKubeDNSPorts)
@@ -236,6 +255,15 @@ func (c *Config) Merge(defaults Config) {
 	if len(c.PublicServices) == 0 {
 		c.PublicServices = defaults.PublicServices
 	}
+	if c.ApiserverWorkloadSelector == nil {
+		c.ApiserverWorkloadSelector = defaults.ApiserverWorkloadSelector
+	}
+	if len(c.NodeCIDRs) == 0 {
+		c.NodeCIDRs = defaults.NodeCIDRs
+	}
+	// AlwaysAllowDNS is intentionally not merged: toConfig() already applies the
+	// default (true) when the YAML key is absent, and Merge must not clobber an
+	// explicit `always_allow_dns: false` (false is the zero value).
 }
 
 // Load reads a YAML config file at the given path. If path is empty,
@@ -257,9 +285,9 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse config %q: %w", path, err)
 	}
 
-	c, err := raw.toConfig()
-	if err != nil {
-		return Config{}, fmt.Errorf("parse config %q: %w", path, err)
+	c, toErr := raw.toConfig()
+	if toErr != nil {
+		return Config{}, fmt.Errorf("parse config %q: %w", path, toErr)
 	}
 
 	c.Merge(Default())
@@ -330,6 +358,31 @@ func (c Config) Validate() error {
 					svc.Namespace, svc.Name, j, ps.Port)
 			}
 		}
+		for j, ps := range svc.EgressPorts {
+			if ps.Protocol == "" {
+				return fmt.Errorf("invalid public_services[%s/%s].egress_ports[%d]: protocol must not be empty",
+					svc.Namespace, svc.Name, j)
+			}
+			if ps.Port < 1 || ps.Port > 65535 {
+				return fmt.Errorf("invalid public_services[%s/%s].egress_ports[%d]: %d (must be 1-65535)",
+					svc.Namespace, svc.Name, j, ps.Port)
+			}
+		}
+		if svc.EgressAllowWorld && len(svc.Ports) == 0 {
+			return fmt.Errorf("public_services[%s/%s]: egress_allow_world requires at least one port", svc.Namespace, svc.Name)
+		}
+	}
+
+	if c.ApiserverWorkloadSelector != nil {
+		if c.ApiserverWorkloadSelector.Namespace == "" || c.ApiserverWorkloadSelector.Name == "" {
+			return fmt.Errorf("apiserver_workload_selector requires both namespace and name")
+		}
+	}
+
+	for _, cidr := range c.NodeCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("node_cidrs: invalid CIDR %q: %w", cidr, err)
+		}
 	}
 
 	return nil
@@ -340,22 +393,25 @@ func (c Config) Validate() error {
 // configRaw is a temporary struct that unmarshals CIDRs as strings,
 // then converts to *net.IPNet before validation.
 type configRaw struct {
-	ClusterCIDRs                 []string        `yaml:"cluster_cidrs,omitempty"`
-	APIServerCIDRs               []string        `yaml:"apiserver_cidrs,omitempty"`
-	ExcludedNamespaces           []string        `yaml:"excluded_namespaces,omitempty"`
-	KubeDNSPorts                 []PortSpec      `yaml:"kube_dns_ports,omitempty"`
-	RareFlowThreshold            float64         `yaml:"rare_flow_threshold,omitempty"`
-	PortScanThreshold            int             `yaml:"port_scan_threshold,omitempty"`
-	PortScanWindowSeconds        int             `yaml:"port_scan_window_seconds,omitempty"`
-	AsymmetricRatio              float64         `yaml:"asymmetric_ratio,omitempty"`
-	PublicEgressKnownGood        []string        `yaml:"public_egress_known_good,omitempty"`
-	AllowedNamespacePairs        map[string][]string `yaml:"allowed_namespace_pairs,omitempty"`
-	PerNamespaceProfiles       map[string]Profile `yaml:"per_namespace_profiles,omitempty"`
-	KnownGoodExternalEndpoints []string        `yaml:"known_good_external_endpoints,omitempty"`
-	PublicEgressAllowlistCIDRs  []string              `yaml:"public_egress_allowlist_cidrs,omitempty"`
-	ApiserverIngressPorts     []PortSpec          `yaml:"apiserver_ingress_ports,omitempty"`
-	ApiserverEgressPorts      []PortSpec          `yaml:"apiserver_egress_ports,omitempty"`
-	PublicServices              []PublicServiceSpec   `yaml:"public_services,omitempty"`
+	ClusterCIDRs               []string            `yaml:"cluster_cidrs,omitempty"`
+	APIServerCIDRs             []string            `yaml:"apiserver_cidrs,omitempty"`
+	ExcludedNamespaces         []string            `yaml:"excluded_namespaces,omitempty"`
+	KubeDNSPorts               []PortSpec          `yaml:"kube_dns_ports,omitempty"`
+	RareFlowThreshold          float64             `yaml:"rare_flow_threshold,omitempty"`
+	PortScanThreshold          int                 `yaml:"port_scan_threshold,omitempty"`
+	PortScanWindowSeconds      int                 `yaml:"port_scan_window_seconds,omitempty"`
+	AsymmetricRatio            float64             `yaml:"asymmetric_ratio,omitempty"`
+	PublicEgressKnownGood      []string            `yaml:"public_egress_known_good,omitempty"`
+	AllowedNamespacePairs      map[string][]string `yaml:"allowed_namespace_pairs,omitempty"`
+	PerNamespaceProfiles       map[string]Profile  `yaml:"per_namespace_profiles,omitempty"`
+	KnownGoodExternalEndpoints []string            `yaml:"known_good_external_endpoints,omitempty"`
+	PublicEgressAllowlistCIDRs []string            `yaml:"public_egress_allowlist_cidrs,omitempty"`
+	ApiserverIngressPorts      []PortSpec          `yaml:"apiserver_ingress_ports,omitempty"`
+	ApiserverEgressPorts       []PortSpec          `yaml:"apiserver_egress_ports,omitempty"`
+	PublicServices             []PublicServiceSpec `yaml:"public_services,omitempty"`
+	ApiserverWorkloadSelector  *WorkloadSelector   `yaml:"apiserver_workload_selector,omitempty"`
+	NodeCIDRs                  []string            `yaml:"node_cidrs,omitempty"`
+	AlwaysAllowDNS             *bool               `yaml:"always_allow_dns,omitempty"`
 }
 
 func (r configRaw) toConfig() (Config, error) {
@@ -372,22 +428,25 @@ func (r configRaw) toConfig() (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		ClusterCIDRs:                 clusterCIDRs,
-		APIServerCIDRs:               apiserverCIDRs,
-		ExcludedNamespaces:           r.ExcludedNamespaces,
-		KubeDNSPorts:                 r.KubeDNSPorts,
-		RareFlowThreshold:            r.RareFlowThreshold,
-		PortScanThreshold:            r.PortScanThreshold,
-		PortScanWindowSeconds:        r.PortScanWindowSeconds,
-		AsymmetricRatio:              r.AsymmetricRatio,
-		PublicEgressKnownGood:        r.PublicEgressKnownGood,
-		AllowedNamespacePairs:        r.AllowedNamespacePairs,
-		PerNamespaceProfiles:         r.PerNamespaceProfiles,
-		KnownGoodExternalEndpoints:   r.KnownGoodExternalEndpoints,
-		PublicEgressAllowlistCIDRs:   publicEgressCIDRs,
-		ApiserverIngressPorts:        r.ApiserverIngressPorts,
-		ApiserverEgressPorts:         r.ApiserverEgressPorts,
-		PublicServices:               r.PublicServices,
+		ClusterCIDRs:               clusterCIDRs,
+		APIServerCIDRs:             apiserverCIDRs,
+		ExcludedNamespaces:         r.ExcludedNamespaces,
+		KubeDNSPorts:               r.KubeDNSPorts,
+		RareFlowThreshold:          r.RareFlowThreshold,
+		PortScanThreshold:          r.PortScanThreshold,
+		PortScanWindowSeconds:      r.PortScanWindowSeconds,
+		AsymmetricRatio:            r.AsymmetricRatio,
+		PublicEgressKnownGood:      r.PublicEgressKnownGood,
+		AllowedNamespacePairs:      r.AllowedNamespacePairs,
+		PerNamespaceProfiles:       r.PerNamespaceProfiles,
+		KnownGoodExternalEndpoints: r.KnownGoodExternalEndpoints,
+		PublicEgressAllowlistCIDRs: publicEgressCIDRs,
+		ApiserverIngressPorts:      r.ApiserverIngressPorts,
+		ApiserverEgressPorts:       r.ApiserverEgressPorts,
+		PublicServices:             r.PublicServices,
+		ApiserverWorkloadSelector:  r.ApiserverWorkloadSelector,
+		NodeCIDRs:                  r.NodeCIDRs,
+		AlwaysAllowDNS:             r.AlwaysAllowDNS == nil || *r.AlwaysAllowDNS,
 	}, nil
 }
 

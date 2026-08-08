@@ -58,14 +58,27 @@ func init() {
 	// Local flags for live
 	liveCmd.Flags().String("hubble-server", "", "Hubble Relay gRPC server address (host:port)")
 	liveCmd.Flags().String("calico-file", "", "Calico flow log file to tail")
+	liveCmd.Flags().BoolVar(&rootFlags.generateUncovered, "generate-uncovered", false, "generate policies for uncovered traffic")
 
 	// Unhide kubeconfig for live (it's used for dry-run with kubeconfig)
 	liveCmd.Flags().String("kubeconfig", "", "path to kubeconfig for dry-run diff")
 	_ = liveCmd.Flags().MarkHidden("kubeconfig")
+
+	liveCmd.Flags().StringSliceVarP(&rootFlags.reports, "report", "r", nil, "report type (repeatable: top-flows, uncovered, coverage, egress-world, drops, anomalies)")
+	liveCmd.Flags().IntVar(&rootFlags.topN, "top-n", 10, "number of top items to display in reports")
 }
 
 // runLiveCommand connects to a live flows source and runs the analysis pipeline.
 func runLiveCommand(cmd *cobra.Command) error {
+	if err := validatePolicyFormat(rootFlags.policyFormat); err != nil {
+		return err
+	}
+
+	// Validate report flags before connecting to a source
+	if err := validateReports(rootFlags.reports); err != nil {
+		return err
+	}
+
 	// Parse the --hubble-server flag from live cmd
 	hubbleServer := ""
 	if f := cmd.Flags().Lookup("hubble-server"); f != nil {
@@ -84,14 +97,14 @@ func runLiveCommand(cmd *cobra.Command) error {
 	defer cancel()
 
 	if hubbleServer != "" {
-		return runLiveHubble(ctx, cmd, hubbleServer)
+		return runLiveHubble(ctx, cmd, hubbleServer, parser.SourceHubble)
 	}
 
-	return runLiveCalico(ctx, cmd, calicoFile)
+	return runLiveCalico(ctx, cmd, calicoFile, parser.SourceCalico)
 }
 
 // runLiveHubble connects to Hubble Relay via gRPC and runs the analysis pipeline.
-func runLiveHubble(ctx context.Context, cmd *cobra.Command, address string) error {
+func runLiveHubble(ctx context.Context, cmd *cobra.Command, address string, srcType parser.Source) error {
 	src := &ingest.HubbleGRPCClient{
 		Address: address,
 		TLS:     false,
@@ -101,19 +114,18 @@ func runLiveHubble(ctx context.Context, cmd *cobra.Command, address string) erro
 	if err != nil {
 		return fmt.Errorf("opening Hubble Relay: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
-	// Run the same pipeline as analyze
-	return runPipelineFromReader(ctx, cmd, reader)
+	return runPipelineFromReader(ctx, cmd, reader, srcType)
 }
 
 // runLiveCalico tails a Calico flow log file and runs the analysis pipeline.
-func runLiveCalico(ctx context.Context, cmd *cobra.Command, filePath string) error {
+func runLiveCalico(ctx context.Context, cmd *cobra.Command, filePath string, srcType parser.Source) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("opening Calico log file %s: %w", filePath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Seek to the end of the file
 	scanner := bufio.NewScanner(file)
@@ -156,11 +168,11 @@ func runLiveCalico(ctx context.Context, cmd *cobra.Command, filePath string) err
 	}()
 
 	// Parse and run pipeline on each line
-	return runPipelineFromLines(ctx, cmd, lines)
+	return runPipelineFromLines(ctx, cmd, lines, srcType)
 }
 
 // runPipelineFromReader reads flows from a reader and executes the full analysis.
-func runPipelineFromReader(ctx context.Context, cmd *cobra.Command, reader io.Reader) error {
+func runPipelineFromReader(ctx context.Context, cmd *cobra.Command, reader io.Reader, srcType parser.Source) error {
 	flows := make(chan flow.Flow, 128)
 	go func() {
 		defer close(flows)
@@ -182,11 +194,11 @@ func runPipelineFromReader(ctx context.Context, cmd *cobra.Command, reader io.Re
 		}
 	}()
 
-	return runPipelineFromFlows(ctx, cmd, flows)
+	return runPipelineFromFlows(ctx, cmd, flows, srcType)
 }
 
 // runPipelineFromLines tails a file line by line and runs the analysis.
-func runPipelineFromLines(ctx context.Context, cmd *cobra.Command, lines <-chan string) error {
+func runPipelineFromLines(ctx context.Context, cmd *cobra.Command, lines <-chan string, srcType parser.Source) error {
 	flows := make(chan flow.Flow, 128)
 	go func() {
 		defer close(flows)
@@ -208,11 +220,11 @@ func runPipelineFromLines(ctx context.Context, cmd *cobra.Command, lines <-chan 
 		}
 	}()
 
-	return runPipelineFromFlows(ctx, cmd, flows)
+	return runPipelineFromFlows(ctx, cmd, flows, srcType)
 }
 
 // runPipelineFromFlows runs the analysis pipeline on flowing flows.
-func runPipelineFromFlows(ctx context.Context, cmd *cobra.Command, flows <-chan flow.Flow) error {
+func runPipelineFromFlows(ctx context.Context, cmd *cobra.Command, flows <-chan flow.Flow, srcType parser.Source) error {
 	var parsedFlows []flow.Flow
 
 loop:
@@ -233,35 +245,50 @@ loop:
 		return nil
 	}
 
-	return runLiveAfterParse(cmd, parsedFlows)
+	return runLiveAfterParse(cmd, parsedFlows, srcType)
 }
 
 // runLiveAfterParse runs the analysis pipeline on already-parsed flows.
-func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow) error {
+func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow, srcType parser.Source) error {
 	cfg, err := config.Load(rootFlags.configPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
+	// Infer apiserver CIDRs then classify flows.
+	cfg.APIServerCIDRs = configIPNetSlice(analyze.InferAPIServerCIDRs(flows, cfg))
 	flows = analyze.Classify(flows, cfg)
 	workloads := analyze.Aggregate(flows)
 	patterns := analyze.ComputePatterns(flows, workloads)
 	anomalies := anomaly.RunAll(flows, patterns, workloads, cfg)
 
+	effectiveFormat := resolvePolicyFormat(rootFlags.policyFormat, srcType)
+
 	pols := policy.Build(flows, patterns, workloads, anomalies, policy.BuildOptions{
-		Cilium:      rootFlags.cilium,
+		Cilium:      effectiveFormat == "cnp",
 		DefaultDeny: rootFlags.defaultDeny,
 		Strict:      rootFlags.strict,
 		Config:      &cfg,
 	})
+
+	// Advisory: warn when Hubble source produces reserved-entity egress on NP format.
+	if effectiveFormat == "np" && srcType == parser.SourceHubble && hasReservedEntityEgress(pols) {
+		fmt.Fprintln(os.Stderr, "Warning: NetworkPolicy cannot express egress to reserved peers (host/remote-node/kube-apiserver); use --policy-format=cnp or configure Cilium policy-cidr-match-mode: nodes")
+	}
 
 	// Write output if directory specified
 	if rootFlags.outputDir != "" {
 		if err := os.MkdirAll(rootFlags.outputDir, 0755); err != nil {
 			return fmt.Errorf("creating output directory: %w", err)
 		}
-		for _, p := range pols {
-			writePolicyYAML(rootFlags.outputDir, p, cfg)
+		if effectiveFormat == "cnp" {
+			if err := writeCiliumYAML(rootFlags.outputDir, pols, flows, workloads); err != nil {
+				return err
+			}
+		} else {
+			for _, p := range pols {
+				writePolicyYAML(rootFlags.outputDir, p, cfg, workloads)
+			}
 		}
 		cmd.Printf("Wrote policy files to %s\n", rootFlags.outputDir)
 	}
@@ -271,7 +298,7 @@ func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow) error {
 		printJSONReport(flows, patterns, workloads, anomalies, pols)
 	}
 	if rootFlags.format == "text" || rootFlags.format == "both" {
-		printTextReport(cmd, flows, patterns, workloads, anomalies, pols, nil, 0)
+		printTextReport(cmd, flows, patterns, workloads, anomalies, pols, rootFlags.reports, rootFlags.topN)
 	}
 
 	return nil

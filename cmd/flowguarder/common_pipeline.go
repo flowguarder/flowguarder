@@ -6,53 +6,84 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
-
-	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/yaml"
 
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/anomaly"
 	"github.com/flowguarder/flowguarder/pkg/config"
 	"github.com/flowguarder/flowguarder/pkg/flow"
 	"github.com/flowguarder/flowguarder/pkg/ingest"
-	_ "github.com/flowguarder/flowguarder/pkg/parser/calico" // register calico parser
-	_ "github.com/flowguarder/flowguarder/pkg/parser/goldmane" // register goldmane parser
-	_ "github.com/flowguarder/flowguarder/pkg/parser/hubble" // register hubble parser
 	"github.com/flowguarder/flowguarder/pkg/parser"
+	_ "github.com/flowguarder/flowguarder/pkg/parser/calico"   // register calico parser
+	_ "github.com/flowguarder/flowguarder/pkg/parser/goldmane" // register goldmane parser
+	_ "github.com/flowguarder/flowguarder/pkg/parser/hubble"   // register hubble parser
 	"github.com/flowguarder/flowguarder/pkg/policy"
 	"github.com/flowguarder/flowguarder/pkg/report"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/yaml"
 )
 
 // rootCmdData holds the flags for the root command so subcommands share them.
 type rootCmdData struct {
-	configPath       string
-	source           string
-	outputDir        string
-	format           string
-	strict           bool
-	defaultDeny      bool
-	cilium           bool
-	kubeconfig       string
-	reports          []string
-	topN             int
+	configPath        string
+	source            string
+	outputDir         string
+	format            string
+	strict            bool
+	defaultDeny       bool
+	policyFormat      string
+	cilium            bool // hidden alias for --policy-format=cnp
+	kubeconfig        string
+	reports           []string
+	topN              int
 	generateUncovered bool
 }
 
 var validReports = map[string]bool{
-	"top-flows":      true,
-	"uncovered":      true,
-	"coverage":       true,
-	"egress-world":   true,
-	"drops":          true,
-	"anomalies":      true,
+	"top-flows":    true,
+	"uncovered":    true,
+	"coverage":     true,
+	"egress-world": true,
+	"drops":        true,
+	"anomalies":    true,
+}
+
+// resolvePolicyFormat resolves the effective policy format from the user-provided
+// flag and the detected source type.  When format is "auto" it defaults to cnp
+// for Hubble and np for all non-Hubble sources.  Explicit "np" and "cnp" pass
+// through unchanged.
+func resolvePolicyFormat(format string, src parser.Source) string {
+	if format != "auto" {
+		return format
+	}
+	switch src {
+	case parser.SourceHubble:
+		return "cnp"
+	default:
+		// SourceCalico, SourceCalicoSyslog, SourceGoldmane, SourceUnknown,
+		// SourceAuto — all default to NetworkPolicy for safety.
+		return "np"
+	}
+}
+
+// validatePolicyFormat returns an error when format is not one of
+// the three accepted values: "auto", "np", "cnp".
+func validatePolicyFormat(format string) error {
+	switch format {
+	case "auto", "np", "cnp":
+		return nil
+	default:
+		return fmt.Errorf("invalid --policy-format %q (valid: auto, np, cnp)", format)
+	}
 }
 
 // runAnalyzePipeline executes the full analyze pipeline and returns any error.
@@ -63,7 +94,12 @@ func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) 
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// 1b. Validate report flags
+	// Validate policy-format flag before anything else
+	if err := validatePolicyFormat(rd.policyFormat); err != nil {
+		return err
+	}
+
+	// Validate report flags
 	if len(rd.reports) > 0 {
 		for _, r := range rd.reports {
 			if !validReports[r] {
@@ -123,7 +159,7 @@ func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) 
 	if err != nil {
 		return fmt.Errorf("opening input: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	var flows []flow.Flow
 	err = p.Parse(reader, func(f flow.Flow) error {
@@ -142,7 +178,7 @@ func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) 
 		return nil
 	}
 
-	return executeAnalysis(cmd, flows, cfg, rd)
+	return executeAnalysis(cmd, flows, cfg, rd, sourceType)
 }
 
 // ingestDir handles directory scanning for DirSource.
@@ -159,7 +195,7 @@ func ingestDir(cmd *cobra.Command, src *ingest.DirSource, cfg config.Config, rd 
 		if err2 != nil {
 			return err2
 		}
-		defer fc.Close()
+		defer func() { _ = fc.Close() }()
 
 		var fileFlows []flow.Flow
 		err2 = p.Parse(fc, func(f flow.Flow) error {
@@ -186,7 +222,7 @@ func ingestDir(cmd *cobra.Command, src *ingest.DirSource, cfg config.Config, rd 
 		return nil
 	}
 
-	return executeAnalysis(cmd, allFlows, cfg, rd)
+	return executeAnalysis(cmd, allFlows, cfg, rd, sourceType)
 }
 
 // autoDetectSource tries to detect the flow-log source from a file, directory or stdin.
@@ -226,11 +262,14 @@ func parseFlagSource(s string) parser.Source {
 }
 
 // executeAnalysis runs the full analysis pipeline on parsed flows.
-func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, rd *rootCmdData) error {
+func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, rd *rootCmdData, sourceType parser.Source) error {
+	effectiveFormat := resolvePolicyFormat(rd.policyFormat, sourceType)
+
 	// 5. Aggregate workloads
 	workloads := analyze.Aggregate(flows)
 
-	// 6. Classify flows (set PeerType)
+	// 6. Infer apiserver CIDRs then classify flows (set PeerType)
+	cfg.APIServerCIDRs = configIPNetSlice(analyze.InferAPIServerCIDRs(flows, cfg))
 	flows = analyze.Classify(flows, cfg)
 
 	// 7. Compute patterns
@@ -241,7 +280,7 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 
 	// 9. Build policies
 	pols := policy.Build(flows, patterns, workloads, anomalies, policy.BuildOptions{
-		Cilium:      rd.cilium,
+		Cilium:      effectiveFormat == "cnp",
 		DefaultDeny: rd.defaultDeny,
 		Strict:      rd.strict,
 		Config:      &cfg,
@@ -252,14 +291,25 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 		return nil
 	}
 
+	// Advisory: warn when Hubble source produces reserved-entity egress on NP format.
+	if effectiveFormat == "np" && sourceType == parser.SourceHubble && hasReservedEntityEgress(pols) {
+		fmt.Fprintln(os.Stderr, "Warning: NetworkPolicy cannot express egress to reserved peers (host/remote-node/kube-apiserver); use --policy-format=cnp or configure Cilium policy-cidr-match-mode: nodes")
+	}
+
 	// 10. Write YAML manifests
 	outDir := rd.outputDir
 	if outDir != "" {
 		if err := os.MkdirAll(outDir, 0755); err != nil {
 			return fmt.Errorf("creating output directory: %w", err)
 		}
-		for _, p := range pols {
-			writePolicyYAML(outDir, p, cfg)
+		if effectiveFormat == "cnp" {
+			if err := writeCiliumYAML(outDir, pols, flows, workloads); err != nil {
+				return err
+			}
+		} else {
+			for _, p := range pols {
+				writePolicyYAML(outDir, p, cfg, workloads)
+			}
 		}
 		cmd.Printf("Wrote policy files to %s\n", outDir)
 	}
@@ -273,13 +323,19 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 			uncoveredPatterns := analyze.ComputePatterns(uncovered, workloads)
 			uncoveredAnomalies := anomaly.RunAll(uncovered, uncoveredPatterns, workloads, cfg)
 			uncoveredPols := policy.Build(uncovered, uncoveredPatterns, workloads, uncoveredAnomalies, policy.BuildOptions{
-				Cilium:      rd.cilium,
+				Cilium:      effectiveFormat == "cnp",
 				DefaultDeny: rd.defaultDeny,
 				Strict:      rd.strict,
 				Config:      &cfg,
 			})
-			for _, p := range uncoveredPols {
-				writePolicyYAML(outDir, p, cfg)
+			if effectiveFormat == "cnp" {
+				if err := writeCiliumYAML(outDir, uncoveredPols, uncovered, workloads); err != nil {
+					return err
+				}
+			} else {
+				for _, p := range uncoveredPols {
+					writePolicyYAML(outDir, p, cfg, workloads)
+				}
 			}
 			cmd.Printf("Wrote %d uncovered policy files to %s\n", len(uncoveredPols), outDir)
 		} else {
@@ -298,9 +354,90 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 	return nil
 }
 
+func hasReservedEntityEgress(pols []policy.Policy) bool {
+	for _, p := range pols {
+		for _, rule := range p.EgressRules {
+			for _, ent := range rule.ToEntities {
+				if strings.Contains(ent, "host") ||
+					strings.Contains(ent, "remote-node") ||
+					strings.Contains(ent, "kube-apiserver") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// warnIllegalSelectorKeysCNP walks the selectors of a built CiliumNetworkPolicy and
+// emits a non-fatal warning to w for every selector key that does not match
+// Kubernetes label-key syntax.  The writer is expected to be os.Stderr.
+func warnIllegalSelectorKeysCNP(w io.Writer, policyFile string, cnp *policy.CiliumNetworkPolicy) {
+	warned := make(map[string]bool)
+	walkLabelMap := func(labels map[string]string) {
+		for k := range labels {
+			if !labelKeyRegex.MatchString(k) {
+				if !warned[k] {
+					warned[k] = true
+					if _, err := fmt.Fprintf(w, "Warning: policy %s has Kubernetes-illegal selector key %q (must use label-key syntax: optional-dns-prefix/name where name is [a-zA-Z0-9_.-]+)\n", policyFile, k); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to write selector-key warning: %v\n", err)
+					}
+				}
+			}
+		}
+	}
+
+	if cnp.Spec.EndpointSelector.MatchLabels != nil {
+		walkLabelMap(cnp.Spec.EndpointSelector.MatchLabels)
+	}
+	for i := range cnp.Spec.Ingress {
+		for j := range cnp.Spec.Ingress[i].FromEndpoints {
+			if cnp.Spec.Ingress[i].FromEndpoints[j].MatchLabels != nil {
+				walkLabelMap(cnp.Spec.Ingress[i].FromEndpoints[j].MatchLabels)
+			}
+		}
+	}
+	for i := range cnp.Spec.Egress {
+		for j := range cnp.Spec.Egress[i].ToEndpoints {
+			if cnp.Spec.Egress[i].ToEndpoints[j].MatchLabels != nil {
+				walkLabelMap(cnp.Spec.Egress[i].ToEndpoints[j].MatchLabels)
+			}
+		}
+	}
+}
+
+// writeCiliumYAML converts policies to CiliumNetworkPolicy objects and writes
+// them as YAML files. It also validates selector keys before writing.
+func writeCiliumYAML(dir string, pols []policy.Policy, flows []flow.Flow, workloads analyze.Workloads) error {
+	cnps := policy.BuildCilium(pols, flows, workloads)
+
+	// Validate selector keys before writing.
+	// We need to know each CNP's output filename to match warnings to files.
+	for i := range cnps {
+		fname := sanitizeName(cnps[i].Metadata.Namespace) + "-" + sanitizeName(cnps[i].Metadata.Name) + ".yaml"
+		warnIllegalSelectorKeysCNP(os.Stderr, fname, &cnps[i])
+	}
+
+	return policy.WriteCiliumYAML(cnps, dir)
+}
+
+// configIPNetSlice converts []string CIDRs to []*net.IPNet for the config.
+func configIPNetSlice(cidrs []string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err == nil && n != nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // writePolicyYAML writes a single policy as a Kubernetes NetworkPolicy manifest.
-func writePolicyYAML(dir string, p policy.Policy, cfg config.Config) {
-	np := buildNetworkPolicy(p, cfg)
+func writePolicyYAML(dir string, p policy.Policy, cfg config.Config, workloads analyze.Workloads) {
+	np := buildNetworkPolicy(p, cfg, workloads)
+	filename := fmt.Sprintf("%s-%s.yaml", sanitizeName(p.WorkloadNamespace), sanitizeName(p.WorkloadName))
+	warnIllegalSelectorKeys(os.Stderr, filename, np)
 	manifest := networkPolicyManifest{
 		APIVersion: np.APIVersion,
 		Kind:       np.Kind,
@@ -316,9 +453,137 @@ func writePolicyYAML(dir string, p policy.Policy, cfg config.Config) {
 		fmt.Fprintf(os.Stderr, "flowguarder: failed to marshal policy %s: %v\n", p.WorkloadID, err)
 		return
 	}
-	filename := fmt.Sprintf("%s-%s.yaml", sanitizeName(p.WorkloadNamespace), sanitizeName(p.WorkloadName))
 	path := filepath.Join(dir, filename)
-	os.WriteFile(path, append([]byte("---\n"), data...), 0644)
+	if err := os.WriteFile(path, append([]byte("---\n"), data...), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "flowguarder: failed to write policy %s: %v\n", filename, err)
+		return
+	}
+}
+
+// labelKeyRegex validates Kubernetes label keys: optional DNS subdomain prefix
+// (ending with /) followed by a name of [a-zA-Z0-9_.-].
+// Cilium reserved key prefixes k8s: and reserved: are also accepted
+// so that cross-namespace CNP selectors like "k8s:io.kubernetes.pod.namespace"
+// and Cilium-internal keys like "reserved:world" pass without warning.
+// Legal: "app", "app.kubernetes.io/name", "run.ai/workload-id",
+//
+//	"k8s:io.kubernetes.pod.namespace", "reserved:world"
+//
+// Illegal: "bad key*", ":app"
+var labelKeyRegex = regexp.MustCompile(
+	`^(?:k8s:|reserved:)?(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[a-zA-Z0-9_.-]+$`,
+)
+
+// warnIllegalSelectorKeys walks the selectors of a built NetworkPolicy and
+// emits a non-fatal warning to w for every selector key that does not match
+// Kubernetes label-key syntax.  The writer is expected to be os.Stderr.
+func warnIllegalSelectorKeys(w io.Writer, policyFile string, np *networkingv1.NetworkPolicy) {
+	warned := make(map[string]bool)
+	walkLabelMap := func(labels map[string]string) {
+		for k := range labels {
+			if !labelKeyRegex.MatchString(k) {
+				if !warned[k] {
+					warned[k] = true
+					if _, err := fmt.Fprintf(w, "Warning: policy %s has Kubernetes-illegal selector key %q (must use label-key syntax: optional-dns-prefix/name where name is [a-zA-Z0-9_.-]+)\n", policyFile, k); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to write selector-key warning: %v\n", err)
+					}
+				}
+			}
+		}
+	}
+	if np.Spec.PodSelector.MatchLabels != nil {
+		walkLabelMap(np.Spec.PodSelector.MatchLabels)
+	}
+	for i := range np.Spec.Ingress {
+		for j := range np.Spec.Ingress[i].From {
+			ps := np.Spec.Ingress[i].From[j].PodSelector
+			if ps != nil && ps.MatchLabels != nil {
+				walkLabelMap(ps.MatchLabels)
+			}
+		}
+	}
+	for i := range np.Spec.Egress {
+		for j := range np.Spec.Egress[i].To {
+			ps := np.Spec.Egress[i].To[j].PodSelector
+			if ps != nil && ps.MatchLabels != nil {
+				walkLabelMap(ps.MatchLabels)
+			}
+		}
+	}
+}
+
+// shouldExpandToCIDRs returns true when the egress rule qualifies for the
+// egress_allow_world /32→0.0.0.0/0 transform (or "apiserver" sentinel → 0.0.0.0/0).
+// Three gates must all pass:
+//
+//  1. The workload (identified by the Policy) must match a PublicServiceSpec
+//     whose EgressAllowWorld is true.
+//  2. The rule must carry ToEntities that contain "host" or "remote-node".
+//  3. The rule must have at least one /32 CIDR or the "apiserver" sentinel
+//     in its ToCIDRs.
+//
+// If cfg is nil or the workload is not found in PublicServices the function
+// returns false (safe default).
+func shouldExpandToCIDRs(rule policy.EgressRule, p policy.Policy, cfg config.Config) bool {
+	if len(cfg.PublicServices) == 0 {
+		return false
+	}
+
+	// Gate 1: workload match + EgressAllowWorld flag.
+	egressAllowWorld := false
+	for _, svc := range cfg.PublicServices {
+		if svc.Namespace == p.WorkloadNamespace && svc.Name == p.WorkloadName {
+			egressAllowWorld = svc.EgressAllowWorld
+			break
+		}
+	}
+	if !egressAllowWorld {
+		return false
+	}
+
+	// Gate 2: entity must contain "host" or "remote-node".
+	hasHostEntity := false
+	for _, ent := range rule.ToEntities {
+		if strings.Contains(ent, "host") || strings.Contains(ent, "remote-node") {
+			hasHostEntity = true
+			break
+		}
+	}
+	if !hasHostEntity {
+		return false
+	}
+
+	// Gate 3: at least one /32 CIDR or the "apiserver" sentinel present.
+	if len(rule.ToCIDRs) == 0 {
+		return false
+	}
+	has32 := false
+	for _, c := range rule.ToCIDRs {
+		if strings.HasSuffix(c, "/32") || c == "apiserver" {
+			has32 = true
+			break
+		}
+	}
+	return has32
+}
+
+// expandToCIDRs replaces every /32 CIDR and the "apiserver" sentinel with
+// 0.0.0.0/0, dedupes, and returns a sorted slice.  Non-/32 CIDRs are preserved.
+func expandToCIDRs(cidrs []string) []string {
+	expanded := make(map[string]bool)
+	for _, c := range cidrs {
+		if strings.HasSuffix(c, "/32") || c == "apiserver" {
+			expanded["0.0.0.0/0"] = true
+		} else {
+			expanded[c] = true
+		}
+	}
+	out := make([]string, 0, len(expanded))
+	for c := range expanded {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func isWorldPeer(peer string) bool {
@@ -331,23 +596,67 @@ func isWorldPeer(peer string) bool {
 	return false
 }
 
-// parseWorkloadSelectorV2 parses a peer string into a NetworkPolicyPeer.
-// When peer is "apiserver", it returns an IPBlock when cfg != nil && cfg.APIServerCIDRs is set,
-// otherwise falls back to a namespaceSelector+podSelector matching all pods in kube-system.
-func parseWorkloadSelectorV2(peer string, cfg *config.Config) (NetworkPolicyPeer, error) {
+// parseWorkloadSelectorV2 parses a peer string into a slice of NetworkPolicyPeer.
+// When peer is "apiserver" and cfg.APIServerCIDRs is set, it returns one IPBlock
+// peer per configured CIDR.  When apiserver CIDRs are absent it returns a single
+// kube-system namespaceSelector+podSelector fallback peer.
+// For all other selectors it returns a single-element slice.
+func parseWorkloadSelectorV2(peer string, cfg *config.Config, workloads analyze.Workloads) ([]NetworkPolicyPeer, error) {
 	if isWorldPeer(peer) {
-		return NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}, nil
+		return []NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}}, nil
 	}
 
 	// Special handling for "apiserver" sentinel.
 	if peer == "apiserver" {
+		var peers []NetworkPolicyPeer
+
 		if cfg != nil && len(cfg.APIServerCIDRs) > 0 {
-			return NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: cfg.APIServerCIDRs[0].String()}}, nil
+			// Keep only host-route CIDRs (IPv4 /32, IPv6 /128).
+			// Service-range CIDRs (e.g. 10.96.0.0/12) never match after DNAT.
+			for _, c := range cfg.APIServerCIDRs {
+				if c == nil {
+					continue
+				}
+				ones, _ := c.Mask.Size()
+				if ones == 32 || ones == 128 {
+					peers = append(peers, NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: c.String()}})
+				}
+			}
 		}
-		return NetworkPolicyPeer{
-			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
-			PodSelector:       &metav1.LabelSelector{},
-		}, nil
+
+		if cfg != nil && len(cfg.NodeCIDRs) > 0 {
+			for _, entry := range cfg.NodeCIDRs {
+				_, cidr, err := net.ParseCIDR(entry)
+				if err != nil {
+					continue
+				}
+				if cidr != nil {
+					peers = append(peers, NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: cidr.String()}})
+				}
+			}
+		}
+
+		// Deterministic sort.
+		sort.Slice(peers, func(i, j int) bool {
+			return peers[i].IPBlock.CIDR < peers[j].IPBlock.CIDR
+		})
+
+		// No host routes or node_cidrs — fall back to kube-system namespaceSelector.
+		if len(peers) == 0 {
+			return []NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
+					PodSelector:       &metav1.LabelSelector{},
+				},
+			}, nil
+		}
+
+		return peers, nil
+	}
+
+	// Build a single peer for non-sentinel selectors.
+	if _, cidr, err := net.ParseCIDR(peer); err == nil && cidr != nil {
+		return []NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: cidr.String()}}}, nil
 	}
 
 	var podLabels map[string]string
@@ -380,6 +689,21 @@ func parseWorkloadSelectorV2(peer string, cfg *config.Config) (NetworkPolicyPeer
 				if podLabels == nil {
 					podLabels = make(map[string]string)
 				}
+				// Resolve real stable labels from the workload when available.
+				if workloads != nil {
+					if wd, ok := workloads[analyze.WorkloadID(potentialNS+"/"+name)]; ok {
+						stable := analyze.StripUnstableLabels(analyze.ResolveSelectors(wd))
+						if len(stable) > 0 {
+							// Merge workload labels into podLabels, explicit segments win.
+							for k, v := range stable {
+								if _, exists := podLabels[k]; !exists {
+									podLabels[k] = v
+								}
+							}
+							continue
+						}
+					}
+				}
 				podLabels["app"] = name
 				continue
 			}
@@ -399,7 +723,7 @@ func parseWorkloadSelectorV2(peer string, cfg *config.Config) (NetworkPolicyPeer
 	if namespace != "" {
 		peerOut.NamespaceSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": namespace}}
 	}
-	return peerOut, nil
+	return []NetworkPolicyPeer{peerOut}, nil
 }
 
 type NetworkPolicyPeer = networkingv1.NetworkPolicyPeer
@@ -485,14 +809,24 @@ type npManifestMeta struct {
 // networkPolicyManifest mirrors the shape of a NetworkPolicy YAML without the
 // fields that cause "null" emission (e.g. creationTimestamp).
 type networkPolicyManifest struct {
-	APIVersion string                 `json:"apiVersion"`
-	Kind       string                 `json:"kind"`
-	Metadata   npManifestMeta         `json:"metadata"`
+	APIVersion string                         `json:"apiVersion"`
+	Kind       string                         `json:"kind"`
+	Metadata   npManifestMeta                 `json:"metadata"`
 	Spec       networkingv1.NetworkPolicySpec `json:"spec"`
 }
 
 // buildNetworkPolicy converts a policy.Policy into a Kubernetes NetworkPolicy object.
-func buildNetworkPolicy(p policy.Policy, cfg config.Config) *networkingv1.NetworkPolicy {
+func buildNetworkPolicy(p policy.Policy, cfg config.Config, workloads analyze.Workloads) *networkingv1.NetworkPolicy {
+	// Scope selector: derive from workload's stable labels, falling back to
+	// {app: workloadName} for unknown/label-less workloads.
+	podSelLabels := map[string]string{"app": p.WorkloadName}
+	if wd, ok := workloads[analyze.WorkloadID(p.WorkloadID)]; ok {
+		stable := analyze.StripUnstableLabels(analyze.ResolveSelectors(wd))
+		if len(stable) > 0 {
+			podSelLabels = stable
+		}
+	}
+
 	np := &networkingv1.NetworkPolicy{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "networking.k8s.io/v1",
@@ -508,9 +842,7 @@ func buildNetworkPolicy(p policy.Policy, cfg config.Config) *networkingv1.Networ
 		},
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": p.WorkloadName,
-				},
+				MatchLabels: podSelLabels,
 			},
 		},
 	}
@@ -525,11 +857,11 @@ func buildNetworkPolicy(p policy.Policy, cfg config.Config) *networkingv1.Networ
 	for _, rule := range p.IngressRules {
 		ir := networkingv1.NetworkPolicyIngressRule{}
 		for _, from := range rule.FromWorkloads {
-			peer, err := parseWorkloadSelectorV2(from, &cfg)
+			peers, err := parseWorkloadSelectorV2(from, &cfg, workloads)
 			if err != nil {
 				continue
 			}
-			ir.From = append(ir.From, peer)
+			ir.From = append(ir.From, peers...)
 		}
 		for _, port := range rule.Ports {
 			portVal := intstr.FromInt(int(port.Port))
@@ -547,20 +879,39 @@ func buildNetworkPolicy(p policy.Policy, cfg config.Config) *networkingv1.Networ
 
 	for _, rule := range p.EgressRules {
 		er := networkingv1.NetworkPolicyEgressRule{}
+
+		// Render ToWorkloads.
 		for _, to := range rule.ToWorkloads {
-			peer, err := parseWorkloadSelectorV2(to, &cfg)
+			peers, err := parseWorkloadSelectorV2(to, &cfg, workloads)
 			if err != nil {
 				continue
 			}
-			er.To = append(er.To, peer)
+			er.To = append(er.To, peers...)
 		}
-		for _, cidr := range rule.ToCIDRs {
-			peer, err := parseWorkloadSelectorV2(cidr, &cfg)
+
+		// Render ToNamespaces as namespaceSelector peer + empty podSelector.
+		for _, ns := range rule.ToNamespaces {
+			er.To = append(er.To, NetworkPolicyPeer{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns},
+				},
+				PodSelector: &metav1.LabelSelector{},
+			})
+		}
+
+		// Render ToCIDRs (with egress_allow_world transform).
+		cidrsToRender := rule.ToCIDRs
+		if shouldExpandToCIDRs(rule, p, cfg) {
+			cidrsToRender = expandToCIDRs(rule.ToCIDRs)
+		}
+		for _, cidr := range cidrsToRender {
+			peers, err := parseWorkloadSelectorV2(cidr, &cfg, workloads)
 			if err != nil {
 				continue
 			}
-			er.To = append(er.To, peer)
+			er.To = append(er.To, peers...)
 		}
+
 		for _, port := range rule.ToPorts {
 			portVal := intstr.FromInt(int(port.Port))
 			npPort := networkingv1.NetworkPolicyPort{

@@ -38,8 +38,8 @@ func RenderJSON(r JSONReport, w io.Writer) error {
 
 	// Build summary object.
 	sum := make(map[string]interface{}, 3)
-	sum["total_patterns"] = r.Summary.TotalPatterns
-	sum["total_anomalies"] = r.Summary.TotalAnomalies
+	sum["total_patterns"] = r.TotalPatterns
+	sum["total_anomalies"] = r.TotalAnomalies
 	sum["anomalies_by_severity"] = r.sortedAnomalySeverity()
 
 	b.items["summary"] = sum
@@ -75,7 +75,9 @@ func RenderJSON(r JSONReport, w io.Writer) error {
 		return fmt.Errorf("marshal JSON: %w", err)
 	}
 
-	fmt.Fprintf(w, "%s\n", indentedJSON(data))
+	if _, err := fmt.Fprint(w, indentedJSON(data)+"\n"); err != nil {
+		return fmt.Errorf("write JSON: %w", err)
+	}
 	return nil
 }
 

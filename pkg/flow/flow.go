@@ -37,11 +37,11 @@ func (v Verdict) IsAllowed() bool {
 type Protocol string
 
 const (
-	TCP   Protocol = "TCP"
-	UDP   Protocol = "UDP"
-	ICMP  Protocol = "ICMP"
-	SCTP  Protocol = "SCTP"
-	ANY_P Protocol = "ANY"
+	TCP  Protocol = "TCP"
+	UDP  Protocol = "UDP"
+	ICMP Protocol = "ICMP"
+	SCTP Protocol = "SCTP"
+	Any  Protocol = "ANY"
 )
 
 // Direction represents the traffic direction relative to a workload.

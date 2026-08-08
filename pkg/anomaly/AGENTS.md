@@ -34,3 +34,14 @@
 - Do NOT register a detector dynamically — it must be a named type added to `RunAll`'s slice.
 - Do NOT call out to network, filesystem, or cluster APIs from any detector.
 - Do NOT change the `RunAll` detector order without updating tests that depend on deterministic output ordering.
+- Do NOT use package-level mutable globals to pass data into detectors — pass via `Detect(flows, ...)` arguments.
+  This is the root cause of the port-scan no-op (see Known Issues below).
+
+## KNOWN ISSUES
+- **Port-scan detector is a silent no-op (dormant bug)** — `pkg/anomaly/portscan.go` declares a package-global
+  `flowFlows` slice at line 82 (`var flowFlows = func() []flow.Flow { return nil }()`) with comment
+  "will be set via RunAll", but nothing ever assigns it. `Detect` iterates `flowFlows` (line 37), so it always
+  sees zero flows and never fires. `RunAll` in `detect.go` receives the `flows` parameter but never wires it into
+  the port-scan detector. Result: the `port-scan` anomaly is a permanent no-op. Do NOT rely on it until fixed.
+  Fix direction: wire the flows through `RunAll` (it already receives the slice) and remove the package-level
+  global so port-scan uses the same `Detect(flows, ...)` signature as all other detectors.

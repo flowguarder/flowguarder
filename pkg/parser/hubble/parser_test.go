@@ -260,9 +260,9 @@ func Test_parseLabels(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name           string
-		input          []string
-		expected       map[string]string
+		name     string
+		input    []string
+		expected map[string]string
 	}{
 		{"single label", []string{"app=frontend"}, map[string]string{"app": "frontend"}},
 		{"multiple labels", []string{"app=web", "env=prod"}, map[string]string{"app": "web", "env": "prod"}},
@@ -270,6 +270,37 @@ func Test_parseLabels(t *testing.T) {
 		{"empty input", []string{}, map[string]string{}},
 		{"nil input", nil, map[string]string{}},
 		{"malformed label skipped", []string{"app=web", "invalid"}, map[string]string{"app": "web"}},
+		// --- k8s: prefix stripping ---
+		{"k8s: prefix stripped from app", []string{"k8s:app=demo-client"}, map[string]string{"app": "demo-client"}},
+		{"k8s: prefix stripped from k8s-app", []string{"k8s:k8s-app=kube-dns"}, map[string]string{"k8s-app": "kube-dns"}},
+		// --- reserved:* bare tokens ---
+		{"reserved:host bare token", []string{"reserved:host"}, map[string]string{"reserved:host": ""}},
+		{"reserved:kube-apiserver bare token", []string{"reserved:kube-apiserver"}, map[string]string{"reserved:kube-apiserver": ""}},
+		{"reserved:world bare token", []string{"reserved:world"}, map[string]string{"reserved:world": ""}},
+		// --- combined acceptance test ---
+		{
+			"Cilium acceptance: k8s:prefix + internal drop + reserved bare tokens",
+			[]string{
+				"k8s:app=demo-client",
+				"k8s:io.cilium.k8s.policy.cluster=kind-flowlab",
+				"reserved:host",
+				"reserved:kube-apiserver",
+			},
+			map[string]string{
+				"app":                     "demo-client",
+				"reserved:host":           "",
+				"reserved:kube-apiserver": "",
+			},
+		},
+		// --- cilium internal keys dropped ---
+		{"io.cilium.* key dropped", []string{"io.cilium.k8s.policy.cluster=kind-flowlab"}, map[string]string{}},
+		{"io.kubernetes.pod.namespace dropped", []string{"io.kubernetes.pod.namespace=default"}, map[string]string{}},
+		{"plain app retained among dropped keys", []string{"io.cilium.foo=bar", "app=web"}, map[string]string{"app": "web"}},
+		// --- collision: plain wins over prefixed ---
+		{"plain app wins over k8s:app prefixed", []string{"k8s:app=v1", "app=v2"}, map[string]string{"app": "v2"}},
+		{"reversed order: plain written first, prefixed ignored", []string{"app=v2", "k8s:app=v1"}, map[string]string{"app": "v2"}},
+		// --- bare non-reserved tokens still dropped ---
+		{"non-reserved bare token dropped", []string{"app=web", "orphan"}, map[string]string{"app": "web"}},
 	}
 
 	for _, tc := range testCases {
@@ -294,8 +325,12 @@ func Test_parseLayer4(t *testing.T) {
 		l4 := parseLayer4(&hubbleLayer4{
 			Protocol: "TCP",
 			TCP: &hubbleLayer4TCPUDP{
-				Source: struct{ Port uint16 `json:"port"` }{Port: 48312},
-				Dest:   struct{ Port uint16 `json:"port"` }{Port: 8080},
+				Source: struct {
+					Port uint16 `json:"port"`
+				}{Port: 48312},
+				Dest: struct {
+					Port uint16 `json:"port"`
+				}{Port: 8080},
 			},
 		})
 		assert.Equal(t, flow.TCP, l4.Protocol)
@@ -308,8 +343,12 @@ func Test_parseLayer4(t *testing.T) {
 		l4 := parseLayer4(&hubbleLayer4{
 			Protocol: "UDP",
 			UDP: &hubbleLayer4TCPUDP{
-				Source: struct{ Port uint16 `json:"port"` }{Port: 51234},
-				Dest:   struct{ Port uint16 `json:"port"` }{Port: 53},
+				Source: struct {
+					Port uint16 `json:"port"`
+				}{Port: 51234},
+				Dest: struct {
+					Port uint16 `json:"port"`
+				}{Port: 53},
 			},
 		})
 		assert.Equal(t, flow.UDP, l4.Protocol)
@@ -436,11 +475,11 @@ func Test_parseEndpoint(t *testing.T) {
 	t.Run("full endpoint", func(t *testing.T) {
 		t.Parallel()
 		ep := parseEndpoint(&hubbleEndpoint{
-			Namespace:  "default",
-			PodName:    "frontend",
-			PodNsp:     "default",
-			IPs:        []string{"10.244.1.15"},
-			Labels:     []string{"app=frontend", "env=prod"},
+			Namespace: "default",
+			PodName:   "frontend",
+			PodNsp:    "default",
+			IPs:       []string{"10.244.1.15"},
+			Labels:    []string{"app=frontend", "env=prod"},
 		})
 		assert.Equal(t, "default", ep.Namespace)
 		assert.Equal(t, "frontend", ep.PodName)
@@ -453,9 +492,9 @@ func Test_parseEndpoint(t *testing.T) {
 		// In some Hubble versions, namespace may be "" but pod_namespace is populated.
 		ep := parseEndpoint(&hubbleEndpoint{
 			Namespace: "",
-			PodName:    "frontend",
-			PodNsp:     "default", // fallback
-			IPs:        []string{"10.244.1.15"},
+			PodName:   "frontend",
+			PodNsp:    "default", // fallback
+			IPs:       []string{"10.244.1.15"},
 		})
 		assert.Equal(t, "default", ep.Namespace)
 	})
@@ -464,8 +503,8 @@ func Test_parseEndpoint(t *testing.T) {
 		t.Parallel()
 		ep := parseEndpoint(&hubbleEndpoint{
 			Namespace: "default",
-			PodName:    "frontend",
-			IPs:        []string{},
+			PodName:   "frontend",
+			IPs:       []string{},
 		})
 		assert.Equal(t, "default", ep.Namespace)
 		assert.Equal(t, "frontend", ep.PodName)
@@ -753,9 +792,9 @@ func TestParseIsReply(t *testing.T) {
 	base := `{"time":"2024-01-01T00:00:00.000Z","verdict":"FORWARDED","ip":{"source":"10.0.0.1","destination":"10.0.0.2"},"l4":{"protocol":"TCP","source":{"port":443},"destination":{"port":8080}},"source":{"namespace":"default","pod_name":"pod-a","IPs":["10.0.0.1"]},"destination":{"namespace":"default","pod_name":"pod-b","IPs":["10.0.0.2"]}`
 
 	tests := []struct {
-		name     string
-		suffix   string
-		want     bool
+		name   string
+		suffix string
+		want   bool
 	}{
 		{
 			name:   "is_reply true",
@@ -848,9 +887,9 @@ func TestParseByteCount(t *testing.T) {
 	p := &Parser{}
 
 	tests := []struct {
-		name   string
-		input  string
-		want   uint64
+		name  string
+		input string
+		want  uint64
 	}{
 		{
 			name:  "bytes field present",

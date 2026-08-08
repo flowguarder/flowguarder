@@ -27,23 +27,23 @@ func (discardWriter) Write(p []byte) (int, error) {
 // calicoRecord mirrors the essential fields of a Calico aggregated flow log
 // JSON object. Only the fields we actually need are defined.
 type calicoRecord struct {
-	StartTime string           `json:"start_time"`
-	Action    string           `json:"action"`
-	Proto     string           `json:"protocol"`
-	SrcName   string           `json:"source_name"`
-	SrcNS     string           `json:"source_namespace"`
-	SrcIP     string           `json:"source_ip"`
-	SrcPorts  []interface{}    `json:"source_ports"`
-	SrcLabels json.RawMessage  `json:"source_labels"`
-	DstName   string           `json:"destination_name"`
-	DstNS     string           `json:"destination_namespace"`
-	DstIP     string           `json:"destination_ip"`
-	DstPort   uint64            `json:"destination_port"`
-	DstLabels json.RawMessage  `json:"dest_labels"`
-	IngressBytes uint64         `json:"ingress_bytes"`
-	EgressBytes uint64          `json:"egress_bytes"`
-	PolicyName  string          `json:"policy_name"`
-	PolicyType  string          `json:"policy_type"`
+	StartTime    string          `json:"start_time"`
+	Action       string          `json:"action"`
+	Proto        string          `json:"protocol"`
+	SrcName      string          `json:"source_name"`
+	SrcNS        string          `json:"source_namespace"`
+	SrcIP        string          `json:"source_ip"`
+	SrcPorts     []interface{}   `json:"source_ports"`
+	SrcLabels    json.RawMessage `json:"source_labels"`
+	DstName      string          `json:"destination_name"`
+	DstNS        string          `json:"destination_namespace"`
+	DstIP        string          `json:"destination_ip"`
+	DstPort      uint64          `json:"destination_port"`
+	DstLabels    json.RawMessage `json:"dest_labels"`
+	IngressBytes uint64          `json:"ingress_bytes"`
+	EgressBytes  uint64          `json:"egress_bytes"`
+	PolicyName   string          `json:"policy_name"`
+	PolicyType   string          `json:"policy_type"`
 }
 
 // sourceLabels wraps the Calico "source_labels" / "dest_labels" shape:
@@ -142,9 +142,9 @@ func mapRecord(rec calicoRecord) (flow.Flow, error) {
 
 	// source endpoint
 	src := flow.Endpoint{
-		PodName:  rec.SrcName,
+		PodName:   rec.SrcName,
 		Namespace: rec.SrcNS,
-		IP:       rec.SrcIP,
+		IP:        rec.SrcIP,
 	}
 	if rec.SrcLabels != nil {
 		src.Labels = parseSourceLabels(rec.SrcLabels)
@@ -168,9 +168,9 @@ func mapRecord(rec calicoRecord) (flow.Flow, error) {
 
 	// destination endpoint
 	dst := flow.Endpoint{
-		PodName:  rec.DstName,
+		PodName:   rec.DstName,
 		Namespace: rec.DstNS,
-		IP:       rec.DstIP,
+		IP:        rec.DstIP,
 	}
 	if rec.DstLabels != nil {
 		dst.Labels = parseSourceLabels(rec.DstLabels)
@@ -180,8 +180,8 @@ func mapRecord(rec calicoRecord) (flow.Flow, error) {
 	dir := directionFromRecord(rec)
 
 	f := flow.Flow{
-		Time:       t,
-		Source:     src,
+		Time:        t,
+		Source:      src,
 		Destination: dst,
 		Layer4: flow.Layer4{
 			SourcePort: srcPort,
@@ -237,7 +237,7 @@ func mapProtocol(proto string) flow.Protocol {
 	case "SCTP":
 		return flow.SCTP
 	default:
-		return flow.ANY_P
+		return flow.Any
 	}
 }
 

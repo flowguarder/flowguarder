@@ -1,4 +1,4 @@
-<p align="center"><img src="flowguarder-logo.png" alt="flowGuarder" width="200"></p>
+<p align="left"><img src="flowguarder-logo.png" alt="flowGuarder" width="200"></p>
 
 # flowGuarder
 
@@ -108,7 +108,8 @@ $ flowguarder analyze flows.jsonl --output ./policies --report top-flows --repor
 | `--format` | Report output format: `text`, `json`, `both` | `text` |
 | `--strict` | Disable safety margins for policy generation | `false` |
 | `--default-deny` | Add deny-all stub policies | `false` |
-| `--cilium` | Emit `CiliumNetworkPolicy` instead of `NetworkPolicy` | `false` |
+| `--policy-format` | Policy output format: `auto`, `np`, `cnp` (auto: Hubble → CNP, Calico/CalicoSyslog/Goldmane → NP) | `auto` |
+| `--cilium` | _(hidden, legacy alias for `--policy-format=cnp`)_ | `false` |
 | `--dry-run` | Only validate input, do not generate output | `false` |
 | `-r, --report` | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none) |
 | `--top-n` | Number of top entries in reports | `10` |
@@ -138,8 +139,12 @@ Inherited from the root command:
 | `--format` | Report output format | `text` |
 | `--strict` | Disable safety margins | `false` |
 | `--default-deny` | Add deny-all stub policies | `false` |
-| `--cilium` | Emit CiliumNetworkPolicy | `false` |
+| `--policy-format` | Policy output format (`auto`, `np`, `cnp` | default `auto`) | `auto` |
+| `--cilium` | _(hidden, legacy alias for `--policy-format=cnp`)_ | `false` |
 | `--kubeconfig` | Path to kubeconfig for dry-run diff (hidden) | (none) |
+| `-r, --report` | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none) |
+| `--top-n` | Number of top entries in reports | `10` |
+| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`) | `false` |
 
 Ctrl-C or SIGTERM gracefully stops the stream.
 
@@ -151,6 +156,22 @@ Prints the flowguarder version.
 $ flowguarder version
 1.0.0
 ```
+
+---
+
+### Choosing NetworkPolicy vs CiliumNetworkPolicy
+
+By default, flowGuarder picks the policy type automatically based on the input source:
+
+| Input source | Default output | Override with |
+|---|---|---|
+| Hubble JSON | `CiliumNetworkPolicy` (`cnp`) | `--policy-format=np` |
+| Calico JSON / CalicoSyslog | `NetworkPolicy` (`np`) | `--policy-format=cnp` |
+| Goldmane (proto3 JSON) | `NetworkPolicy` (`np`) | `--policy-format=cnp` |
+
+Use `--policy-format=np` to force standard Kubernetes `NetworkPolicy` output, or `--policy-format=cnp` to force `CiliumNetworkPolicy` regardless of input source.
+
+> **Cilium note:** When running Cilium *with its default policy engine* (not `policy-cidr-match-mode: nodes`), generating `NetworkPolicy` manifests is **not effective** for host, remote-node, and kube-apiserver egress. Standard `NetworkPolicy` cannot address those peers. Similarly, the `egress_allow_world` expansion (reserved host / remote-node peers rendered as `0.0.0.0/0`) only works on vanilla CNI defaults or on Cilium when `policy-cidr-match-mode: nodes` is configured. On a Cilium-default cluster, use `--policy-format=cnp` (the default for Hubble input) or the legacy `--cilium` flag to get proper Cilium entity-sentinel output.
 
 ---
 
@@ -264,15 +285,77 @@ per_namespace_profiles:
 # apiserver_ingress_ports: ...  # Default: TCP {9443, 8443, 5443, 6443}
 # apiserver_egress_ports: ...  # Default: TCP {6443}
 
+# --- API Server Workload Selector ---
+# Explicitly identify the workload treated as kube-apiserver for the
+# apiserver-port override. Defaults to kube-system/kube-apiserver when present;
+# when absent only reserved:kube-apiserver peers trigger the override.
+# apiserver_workload_selector:
+#   namespace: "kube-system"
+#   name: "kube-apiserver"
+
+# --- Node CIDRs ---
+# Optional IP ranges covering cluster nodes. When set, NetworkPolicy renders
+# these alongside inferred /32 node IPs for apiserver rules.
+# node_cidrs:
+#   - "192.168.107.0/24"
+
+# --- Always Allow DNS ---
+# Synthesize an egress rule (UDP+TCP 53 → kube-dns) for every workload
+# with at least one egress rule.
+# Default: true
+# always_allow_dns: true
+
 # --- Public Services ---
 # Services rendered as a single match-all ingress rule.
+# egress_allow_world: true on individual entries reserves the right to
+# render host/remote-node egress for that service as 0.0.0.0/0.
+# Default: [] (kube-dns at 53/UDP+TCP, metrics-server at 4443/TCP+10250/TCP)
 # public_services:
 #   - namespace: "kube-system"
 #     name: "kube-dns"
 #     ports:
 #       - protocol: "UDP"
 #         port: 53
+#       - protocol: "TCP"
+#         port: 53
+#     egress_allow_world: true
+#   - namespace: "kube-system"
+#     name: "metrics-server"
+#     ports:
+#       - protocol: "TCP"
+#         port: 4443
+#       - protocol: "TCP"
+#         port: 10250
+#     egress_ports:                      # synthesizes an egress rule for infrastructure connections
+#       - protocol: "TCP"                # outbound from this service (dual-carry 0.0.0.0/0 + entity:world)
+#         port: 80
+#       - protocol: "UDP"
+#         port: 53
 ```
+
+### Config key reference
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `cluster_cidrs` | `[]string (CIDRs)` | `["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fd00::/8", "100.64.0.0/10"]` | IP ranges considered internal (RFC 1918 + CGNAT + ULA). |
+| `apiserver_cidrs` | `[]string (CIDRs)` | `["10.96.0.0/12"]` | IP ranges carrying kube-apiserver traffic. |
+| `excluded_namespaces` | `[]string` | `["kube-system", "calico-system", "tigera-operator"]` | Namespaces whose flows are silently ignored. |
+| `kube_dns_ports` | `[]PortSpec` | `UDP/53, TCP/53` | Well-known Kubernetes DNS ports. |
+| `always_allow_dns` | `bool` | `true` | Synthesize an egress rule (UDP+TCP 53 to kube-dns) for every workload with at least one egress rule. |
+| `rare_flow_threshold` | `float64` | `0.001` | Percentile (0..1) below which a flow pattern is a rare-flow anomaly. |
+| `port_scan_threshold` | `int` | `10` | Number of distinct destination ports within the time window before flagging. |
+| `port_scan_window_seconds` | `int` | `10` | Time window for port-scan detection. |
+| `asymmetric_ratio` | `float64` | `10.0` | Egress/ingress byte ratio threshold. |
+| `public_egress_known_good` | `[]string` | `[]` | Domain names known-good as legitimate egress targets. |
+| `known_good_external_endpoints` | `[]string` | `[]` | FQDNs or IPs confirmed as good external egress targets. |
+| `public_egress_allowlist_cidrs` | `[]string (CIDRs)` | `[]` | Public CIDR ranges considered benign external traffic. |
+| `allowed_namespace_pairs` | `map[string][]string` | `{}` | Maps source namespace to allowed destination namespaces. |
+| `per_namespace_profiles` | `map[string]Profile` | `{}` | Per-namespace rules: `allowed_targets`, `disallowed_targets`, `required_labels`. |
+| `apiserver_ingress_ports` | `[]PortSpec` | `TCP {9443, 8443, 5443, 6443}` | Well-known ingress ports for kube-apiserver classification. |
+| `apiserver_egress_ports` | `[]PortSpec` | `TCP {6443}` | Well-known egress ports to kube-apiserver. |
+| `apiserver_workload_selector` | `struct` | `{namespace: kube-system, name: kube-apiserver}` | Identifies the workload treated as kube-apiserver for port override. Only one selector is supported; specifying more than one entry overwrites the previous value. |
+| `node_cidrs` | `[]string (CIDRs)` | `[]` | Optional IP ranges covering cluster nodes for NetworkPolicy rendering. |
+| `public_services` | `[]PublicServiceSpec` | `kube-dns (53/udp, 53/tcp), metrics-server (4443/tcp, 10250/tcp)` | Kubernetes services rendered as a single match-all **ingress** rule. Each entry has fields `namespace`, `name`, `ports`, **`egress_allow_world`** (`bool`, default `false`) — enables rendering reserved host/remote-node egress for that service as `0.0.0.0/0`, and **`egress_ports`** (`[]PortSpec`, default `[]`) — synthesizes an egress rule for outbound traffic from the service. |
 
 ---
 

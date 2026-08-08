@@ -4,11 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/config"
 	"github.com/flowguarder/flowguarder/pkg/flow"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAsymmetricDetector(t *testing.T) {
@@ -73,7 +72,7 @@ func TestAsymmetricDetector(t *testing.T) {
 				"gpu-operator/gpu-node": {
 					Name: "gpu-node", Namespace: "gpu-operator",
 					Labels: map[string]string{"app": "gpu-node"},
-					Kind:  analyze.Unknown,
+					Kind:   analyze.Unknown,
 				},
 			},
 			expectCount: 0,
@@ -87,7 +86,7 @@ func TestAsymmetricDetector(t *testing.T) {
 				"batch/my-cron": {
 					Name: "my-cron", Namespace: "batch",
 					Labels: map[string]string{"app": "my-cron", "job-name": "my-cron-job"},
-					Kind:  analyze.CronJob,
+					Kind:   analyze.CronJob,
 				},
 			},
 			expectCount: 0,

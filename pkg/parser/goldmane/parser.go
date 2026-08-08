@@ -26,38 +26,38 @@ func (discardWriter) Write(p []byte) (int, error) {
 
 // flowResultJSON mirrors the top-level Goldmane FlowResult proto3 JSON.
 type flowResultJSON struct {
-	ID   string      `json:"id"`
-	Flow *flowJSON   `json:"flow"`
+	ID   string    `json:"id"`
+	Flow *flowJSON `json:"flow"`
 }
 
 // flowJSON mirrors the nested "flow" object inside FlowResult.
 type flowJSON struct {
-	Key     *flowKeyJSON `json:"Key"`
-	StartTime string     `json:"startTime"`
-	EndTime   string     `json:"endTime"`
-	SourceLabels []string `json:"sourceLabels"`
-	DestLabels   []string `json:"destLabels"`
-	PacketsIn   string   `json:"packetsIn"`
-	PacketsOut  string   `json:"packetsOut"`
-	BytesIn     string   `json:"bytesIn"`
-	BytesOut    string   `json:"bytesOut"`
-	NumConnectionsStarted  string `json:"numConnectionsStarted"`
-	NumConnectionsCompleted string `json:"numConnectionsCompleted"`
-	NumConnectionsLive  string `json:"numConnectionsLive"`
+	Key                     *flowKeyJSON `json:"Key"`
+	StartTime               string       `json:"startTime"`
+	EndTime                 string       `json:"endTime"`
+	SourceLabels            []string     `json:"sourceLabels"`
+	DestLabels              []string     `json:"destLabels"`
+	PacketsIn               string       `json:"packetsIn"`
+	PacketsOut              string       `json:"packetsOut"`
+	BytesIn                 string       `json:"bytesIn"`
+	BytesOut                string       `json:"bytesOut"`
+	NumConnectionsStarted   string       `json:"numConnectionsStarted"`
+	NumConnectionsCompleted string       `json:"numConnectionsCompleted"`
+	NumConnectionsLive      string       `json:"numConnectionsLive"`
 }
 
 // flowKeyJSON mirrors the Key nested object.
 type flowKeyJSON struct {
-	SourceName      string `json:"sourceName"`
-	SourceNamespace string `json:"sourceNamespace"`
-	SourceType      string `json:"sourceType"`
-	DestName        string `json:"destName"`
-	DestNamespace   string `json:"destNamespace"`
-	DestType        string `json:"destType"`
-	DestPort        string `json:"destPort"`
-	Proto           string `json:"proto"`
-	Reporter        string `json:"reporter"`
-	Action          string `json:"action"`
+	SourceName      string          `json:"sourceName"`
+	SourceNamespace string          `json:"sourceNamespace"`
+	SourceType      string          `json:"sourceType"`
+	DestName        string          `json:"destName"`
+	DestNamespace   string          `json:"destNamespace"`
+	DestType        string          `json:"destType"`
+	DestPort        string          `json:"destPort"`
+	Proto           string          `json:"proto"`
+	Reporter        string          `json:"reporter"`
+	Action          string          `json:"action"`
 	Policies        json.RawMessage `json:"policies"`
 }
 
@@ -218,20 +218,20 @@ func mapFlowResult(result flowResultJSON) (flow.Flow, error) {
 	dstLabels := parseLabels(result.Flow.DestLabels)
 
 	f := flow.Flow{
-		Time:       t,
-		Verdict:    v,
-		Direction:  dir,
+		Time:      t,
+		Verdict:   v,
+		Direction: dir,
 		Source: flow.Endpoint{
-			Namespace:   key.SourceNamespace,
-			PodName:     srcPod,
-			IP:          "0.0.0.0", // Goldmane doesn't expose per-flow IPs
-			Labels:      srcLabels,
+			Namespace: key.SourceNamespace,
+			PodName:   srcPod,
+			IP:        "0.0.0.0", // Goldmane doesn't expose per-flow IPs
+			Labels:    srcLabels,
 		},
 		Destination: flow.Endpoint{
-			Namespace:   key.DestNamespace,
-			PodName:     dstPod,
-			IP:          "0.0.0.0", // Goldmane doesn't expose per-flow IPs
-			Labels:      dstLabels,
+			Namespace: key.DestNamespace,
+			PodName:   dstPod,
+			IP:        "0.0.0.0", // Goldmane doesn't expose per-flow IPs
+			Labels:    dstLabels,
 		},
 		Layer4: flow.Layer4{
 			DestPort: dstPort,
@@ -241,7 +241,7 @@ func mapFlowResult(result flowResultJSON) (flow.Flow, error) {
 		Packets:      packets,
 		SourceLabels: srcLabels,
 		DestLabels:   dstLabels,
-		IsReply:   false,
+		IsReply:      false,
 	}
 
 	// --- PolicyName: find first Deny in enforcedPolicies, fallback first entry---
@@ -265,7 +265,7 @@ type policiesJSON struct {
 // resolvePolicyName unmarshals key.Policies and returns the name of the first
 // Deny-enforced policy, or the first enforced entry if none is Deny.
 func resolvePolicyName(raw json.RawMessage) string {
-	if raw == nil || len(raw) == 0 {
+	if len(raw) == 0 {
 		return ""
 	}
 	var p policiesJSON
@@ -311,7 +311,7 @@ func mapProto(proto string) flow.Protocol {
 	case "SCTP":
 		return flow.SCTP
 	default:
-		return flow.ANY_P
+		return flow.Any
 	}
 }
 

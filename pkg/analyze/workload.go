@@ -11,13 +11,13 @@ import (
 // WorkloadKey defines the priority-ordered labels for workload name resolution.
 // Higher-priority labels appear earlier in the slice and are checked first.
 const (
-	WorkloadKeyAppName          = "app"
-	WorkloadKeyAppNameK8s       = "app.kubernetes.io/name"
-	WorkloadKeyAppComponent     = "app.kubernetes.io/component"
-	WorkloadKeyName             = "name"
-	WorkloadKeyK8sApp           = "k8s-app"
-	WorkloadKeyJobName          = "job-name"
-	WorkloadKeyControllerUID    = "controller-uid"
+	WorkloadKeyAppName       = "app"
+	WorkloadKeyAppNameK8s    = "app.kubernetes.io/name"
+	WorkloadKeyAppComponent  = "app.kubernetes.io/component"
+	WorkloadKeyName          = "name"
+	WorkloadKeyK8sApp        = "k8s-app"
+	WorkloadKeyJobName       = "job-name"
+	WorkloadKeyControllerUID = "controller-uid"
 )
 
 // workloadKeyOrder defines the priority order for label-based name resolution.
@@ -65,7 +65,7 @@ type WorkloadID string
 // Workloads is a map of WorkloadID to Workload.
 type Workloads map[WorkloadID]Workload
 
-// SortedWorkloadIDs returns workload IDs sorted deterministically.
+// SortedIDs returns workload IDs sorted deterministically.
 func (w Workloads) SortedIDs() []string {
 	ids := make([]string, 0, len(w))
 	for id := range w {
@@ -81,6 +81,12 @@ var (
 	hashPattern = regexp.MustCompile(`-([0-9a-fA-F]{8,})$`)
 	// alnumPattern matches a dash followed by 9+ alphanumeric characters at the end.
 	alnumPattern = regexp.MustCompile(`-([a-zA-Z0-9]{9,})$`)
+	// podHashSuffix matches a dash followed by exactly 5 alnum chars (the "random"
+	// pod hash suffix appended by the controller, e.g. "-cn4kb").
+	podHashRe = regexp.MustCompile(`-([a-zA-Z0-9]{5})$`)
+	// templateHashSuffix matches a dash followed by 8–10 alnum chars (the
+	// pod-template-hash, e.g. "-7dc846544d").  Used for multi-segment base names.
+	templateHashRe = regexp.MustCompile(`-([a-zA-Z0-9]{8,10})$`)
 )
 
 // StripPodTemplateHash removes a trailing pod-template-hash suffix from a name.
@@ -101,24 +107,53 @@ func StripPodTemplateHash(s string) string {
 }
 
 // WorkloadNameFromPodName extracts a workload name from a pod name by
-// splitting on dash. For single-name pods (e.g. "single") the full name is
-// returned. For two-part names the first part is returned (the second is a
-// hash). For three or more parts the first two parts are joined.
+// stripping trailing pod-template-hash suffixes.
+//
+// Rules:
+//
+//  1. A trailing 5-character alnum suffix (e.g. "-cn4kb") is always stripped.
+//  2. A trailing 8–10 character alnum suffix (e.g. "-7dc846544d") is stripped
+//     only when the remaining base contains a dash (multi-segment base like
+//     "demo-client" or "local-path-provisioner").
+//  3. A trailing 8–10 character alnum suffix with no preceding 5-char pod hash
+//     is always stripped (single-segment bases like "frontend").
+//  4. Anything else is returned unchanged.
 //
 // Examples:
 //
-//	"frontend-7d3f9abc" → "frontend"
-//	"api-gw-pqr55"      → "api-gw"
-//	"single"            → "single"
+//	"local-path-provisioner-7dc846544d-cn4kb" → "local-path-provisioner"
+//	"coredns-668d6bf9bc-abcde"                → "coredns-668d6bf9bc"
+//	"demo-client-6d5fd48c7d-tnjbp"            → "demo-client"
+//	"api-gw-pqr55"                            → "api-gw"
+//	"frontend-7d3f9abc"                       → "frontend"
+//	"single"                                  → "single"
+//	"a-b-c-d"                                 → "a-b-c-d"
+//	"cache-1"                                 → "cache-1"
 func WorkloadNameFromPodName(podName string) string {
-	parts := strings.Split(podName, "-")
-	if len(parts) == 1 {
-		return podName
+	// Step 1: Strip a 5-char alnum pod-hash suffix (e.g. "-cn4kb", "-abcde").
+	if podHashRe.MatchString(podName) {
+		name := podHashRe.ReplaceAllString(podName, "")
+		// Step 2: From the remaining string, strip a template hash
+		// only if the base before it is multi-segment (contains a dash).
+		if templateHashRe.MatchString(name) {
+			sub := templateHashRe.FindString(name)
+			base := name[:len(name)-len(sub)]
+			if strings.Contains(base, "-") {
+				return templateHashRe.ReplaceAllString(name, "")
+			}
+			// Single-segment base (e.g. "coredns"): keep the template hash.
+			return name
+		}
+		return name
 	}
-	if len(parts) == 2 {
-		return parts[0]
+
+	// No pod hash found — check for a direct template-hash suffix.
+	if templateHashRe.MatchString(podName) {
+		return templateHashRe.ReplaceAllString(podName, "")
 	}
-	return parts[0] + "-" + parts[1]
+
+	// Nothing matched: return unchanged ("single", "a-b-c-d", "cache-1").
+	return podName
 }
 
 // ResolveWorkload maps a flow endpoint to a Workload by inspecting labels,
@@ -126,13 +161,16 @@ func WorkloadNameFromPodName(podName string) string {
 //
 // Name resolution priority (first matching label is used):
 //
-//	1. app
-//	2. app.kubernetes.io/name
-//	3. app.kubernetes.io/component
-//	4. name
-//	5. k8s-app
-//	6. job-name
-//	7. controller-uid
+//  1. app
+//  2. app.kubernetes.io/name
+//  3. app.kubernetes.io/component
+//  4. name
+//  5. k8s-app
+//  6. job-name
+//  7. controller-uid
+//  8. k8s:app (defensive fallback for Goldmane/Calico prefixed labels)
+//  9. k8s:app.kubernetes.io/name
+//     … (same k8s: prefix for each key in workloadKeyOrder)
 //
 // Kind detection (based on label hints):
 //   - job-name or controller-uid → CronJob
@@ -148,6 +186,17 @@ func ResolveWorkload(endpoint flow.Endpoint) Workload {
 		if v, ok := endpoint.Labels[key]; ok && v != "" {
 			name = StripPodTemplateHash(v)
 			break
+		}
+	}
+
+	// Defensive fallback: if no name found, try k8s: prefixed variants.
+	if name == "" {
+		for _, key := range workloadKeyOrder {
+			prefixed := "k8s:" + key
+			if v, ok := endpoint.Labels[prefixed]; ok && v != "" {
+				name = StripPodTemplateHash(v)
+				break
+			}
 		}
 	}
 

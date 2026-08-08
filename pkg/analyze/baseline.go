@@ -14,11 +14,11 @@ type HourBucket struct {
 
 // Baseline captures the time-distribution statistics for a single pattern.
 type Baseline struct {
-	PatternKey  string
-	TotalCount  uint64
+	PatternKey    string
+	TotalCount    uint64
 	HourlyBuckets []HourBucket
-	MeanPerHour float64
-	StdDev      float64
+	MeanPerHour   float64
+	StdDev        float64
 }
 
 // ComputeBaseline builds a time-distribution baseline for every pattern.

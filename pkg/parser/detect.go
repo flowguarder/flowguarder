@@ -31,10 +31,10 @@ func RegisterParser(src Source, fn func() Parser) {
 // flow-log format from the entire blob (first non-empty line for syslog, full
 // blob for JSON probes):
 //
-//	- First non-empty line starting with '<' (syslog priority prefix) → SourceCalicoSyslog
-//	- Blob containing a JSON field "verdict"                           → SourceHubble
-//	- Blob containing "flow" AND "sourceName"                           → SourceGoldmane
-//	- Blob containing a JSON field "action"                             → SourceCalico
+//   - First non-empty line starting with '<' (syslog priority prefix) → SourceCalicoSyslog
+//   - Blob containing a JSON field "verdict"                           → SourceHubble
+//   - Blob containing "flow" AND "sourceName"                           → SourceGoldmane
+//   - Blob containing a JSON field "action"                             → SourceCalico
 //
 // When no recognized probe is found the function returns a FormatError.
 // Returns ErrAmbiguous also when the input is empty or contains no parsable line.
@@ -104,7 +104,7 @@ func DetectFormatFile(path string) (Source, error) {
 	if err != nil {
 		return SourceUnknown, fmt.Errorf("opening file %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	src, err := DetectFormat(f)
 	if err != nil {

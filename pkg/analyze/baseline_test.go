@@ -12,10 +12,10 @@ func TestComputeBaseline(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Hour)
 
 	tests := []struct {
-		name          string
-		patterns      []Pattern
-		expectCount   int
-		expectKeys    []string
+		name        string
+		patterns    []Pattern
+		expectCount int
+		expectKeys  []string
 	}{
 		{
 			name:        "empty",

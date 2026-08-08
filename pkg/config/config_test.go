@@ -179,8 +179,8 @@ excluded_namespaces:
 // TestValidateNegativeThresholds tests that Validate() rejects negative thresholds.
 func TestValidateNegativeThresholds(t *testing.T) {
 	tests := []struct {
-		name  string
-		mod   func(*Config)
+		name   string
+		mod    func(*Config)
 		errSub string
 	}{
 		{
@@ -269,7 +269,7 @@ func TestMerge(t *testing.T) {
 			name: "zero-valued ClusterCIDRs filled from defaults",
 			input: func() Config {
 				c := Config{
-					ClusterCIDRs:    nil,
+					ClusterCIDRs:      nil,
 					RareFlowThreshold: 0.05,
 				}
 				return c
@@ -325,10 +325,10 @@ func TestMerge(t *testing.T) {
 // TestMergeMaps tests that Merge() fills map fields from defaults.
 func TestMergeMaps(t *testing.T) {
 	c := Config{
-		AllowedNamespacePairs:       map[string][]string{},
-		PerNamespaceProfiles:        map[string]Profile{},
-		PublicEgressKnownGood:       []string{},
-		KnownGoodExternalEndpoints:  []string{},
+		AllowedNamespacePairs:      map[string][]string{},
+		PerNamespaceProfiles:       map[string]Profile{},
+		PublicEgressKnownGood:      []string{},
+		KnownGoodExternalEndpoints: []string{},
 	}
 	c.Merge(Default())
 
@@ -563,4 +563,537 @@ apiserver_egress_ports:
 	c4, err := Load("")
 	require.NoError(t, err)
 	assert.Equal(t, DefaultApiserverEgressPorts, c4.ApiserverEgressPorts)
+}
+
+// --- WorkloadSelector and NodeCIDRs tests ---
+
+func TestDefault_ApiserverWorkloadSelector(t *testing.T) {
+	t.Parallel()
+
+	c := Default()
+	require.NotNil(t, c.ApiserverWorkloadSelector)
+	assert.Equal(t, "kube-system", c.ApiserverWorkloadSelector.Namespace)
+	assert.Equal(t, "kube-apiserver", c.ApiserverWorkloadSelector.Name)
+}
+
+func TestDefault_NodeCIDRs(t *testing.T) {
+	t.Parallel()
+
+	c := Default()
+	assert.Empty(t, c.NodeCIDRs)
+}
+
+func TestMerge_ApiserverWorkloadSelector(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil selector gets default", func(t *testing.T) {
+		c := Config{}
+		c.Merge(Default())
+		require.NotNil(t, c.ApiserverWorkloadSelector)
+		assert.Equal(t, "kube-system", c.ApiserverWorkloadSelector.Namespace)
+		assert.Equal(t, "kube-apiserver", c.ApiserverWorkloadSelector.Name)
+	})
+
+	t.Run("explicit selector preserved", func(t *testing.T) {
+		c := Config{
+			ApiserverWorkloadSelector: &WorkloadSelector{
+				Namespace: "kube-public",
+				Name:      "my-api",
+			},
+		}
+		c.Merge(Default())
+		assert.Equal(t, "kube-public", c.ApiserverWorkloadSelector.Namespace)
+		assert.Equal(t, "my-api", c.ApiserverWorkloadSelector.Name)
+	})
+}
+
+func TestMerge_NodeCIDRs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty NodeCIDRs gets default", func(t *testing.T) {
+		c := Config{NodeCIDRs: []string{}}
+		c.Merge(Default())
+		assert.Empty(t, c.NodeCIDRs)
+	})
+
+	t.Run("explicit NodeCIDRs preserved", func(t *testing.T) {
+		c := Config{NodeCIDRs: []string{"10.0.0.0/8"}}
+		c.Merge(Default())
+		assert.Equal(t, []string{"10.0.0.0/8"}, c.NodeCIDRs)
+	})
+
+	t.Run("nil NodeCIDRs gets default", func(t *testing.T) {
+		c := Config{NodeCIDRs: nil}
+		c.Merge(Default())
+		assert.Empty(t, c.NodeCIDRs)
+	})
+}
+
+func TestValidate_NodesCIDR(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		nodeCIDRs []string
+		wantErr   bool
+		errSub    string
+	}{
+		{
+			name:      "valid CIDR",
+			nodeCIDRs: []string{"192.168.0.0/16"},
+			wantErr:   false,
+		},
+		{
+			name:      "valid multiple CIDRs",
+			nodeCIDRs: []string{"192.168.0.0/16", "10.0.0.0/8"},
+			wantErr:   false,
+		},
+		{
+			name:      "empty list",
+			nodeCIDRs: []string{},
+			wantErr:   false,
+		},
+		{
+			name:      "nil list",
+			nodeCIDRs: nil,
+			wantErr:   false,
+		},
+		{
+			name:      "invalid CIDR",
+			nodeCIDRs: []string{"not-a-cidr"},
+			wantErr:   true,
+			errSub:    "node_cidrs: invalid CIDR",
+		},
+		{
+			name:      "first invalid CIDR",
+			nodeCIDRs: []string{"valid-3o0.0.0.0/8", "not-cidr"},
+			wantErr:   true,
+			errSub:    "node_cidrs: invalid CIDR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Default()
+			c.NodeCIDRs = tt.nodeCIDRs
+			err := c.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errSub)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidate_ApiserverWorkloadSelector(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		selector *WorkloadSelector
+		wantErr  bool
+		errSub   string
+	}{
+		{
+			name:     "nil selector skipped",
+			selector: nil,
+			wantErr:  false,
+		},
+		{
+			name:     "valid selector",
+			selector: &WorkloadSelector{Namespace: "kube-system", Name: "kube-apiserver"},
+			wantErr:  false,
+		},
+		{
+			name:     "empty namespace",
+			selector: &WorkloadSelector{Name: "apiserver"},
+			wantErr:  true,
+			errSub:   "apiserver_workload_selector requires both namespace and name",
+		},
+		{
+			name:     "empty name",
+			selector: &WorkloadSelector{Namespace: "kube-system"},
+			wantErr:  true,
+			errSub:   "apiserver_workload_selector requires both namespace and name",
+		},
+		{
+			name:     "empty namespace and name",
+			selector: &WorkloadSelector{},
+			wantErr:  true,
+			errSub:   "apiserver_workload_selector requires both namespace and name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Default()
+			c.ApiserverWorkloadSelector = tt.selector
+			err := c.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errSub)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLoadYAML_ApiserverWorkloadSelectorAndNodeCIDRs(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+apiserver_workload_selector:
+  namespace: kube-system
+  name: kube-apiserver
+node_cidrs:
+  - "192.168.107.0/24"
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(yamlContent), 0644))
+
+	c, err := Load(cfgPath)
+	require.NoError(t, err)
+
+	require.NotNil(t, c.ApiserverWorkloadSelector)
+	assert.Equal(t, "kube-system", c.ApiserverWorkloadSelector.Namespace)
+	assert.Equal(t, "kube-apiserver", c.ApiserverWorkloadSelector.Name)
+
+	require.Len(t, c.NodeCIDRs, 1)
+	assert.Equal(t, "192.168.107.0/24", c.NodeCIDRs[0])
+}
+
+func TestToConfig_ApiserverWorkloadSelectorAndNodeCIDRs(t *testing.T) {
+	t.Parallel()
+
+	raw := configRaw{
+		ApiserverWorkloadSelector: &WorkloadSelector{Namespace: "kube-public", Name: "my-api"},
+		NodeCIDRs:                 []string{"10.0.0.0/8", "172.16.0.0/12"},
+	}
+
+	c, err := raw.toConfig()
+	require.NoError(t, err)
+
+	require.NotNil(t, c.ApiserverWorkloadSelector)
+	assert.Equal(t, "kube-public", c.ApiserverWorkloadSelector.Namespace)
+	assert.Equal(t, "my-api", c.ApiserverWorkloadSelector.Name)
+
+	require.Len(t, c.NodeCIDRs, 2)
+	assert.Equal(t, "10.0.0.0/8", c.NodeCIDRs[0])
+	assert.Equal(t, "172.16.0.0/12", c.NodeCIDRs[1])
+}
+
+// TestToConfig_AlwaysAllowDNS tests the *bool → bool conversion in toConfig.
+func TestToConfig_AlwaysAllowDNS(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil pointer defaults to true", func(t *testing.T) {
+		t.Parallel()
+		raw := configRaw{}
+		c, err := raw.toConfig()
+		require.NoError(t, err)
+		assert.True(t, c.AlwaysAllowDNS, "nil AlwaysAllowDNS should default to true")
+	})
+
+	t.Run("explicit false yields false", func(t *testing.T) {
+		t.Parallel()
+		f := false
+		raw := configRaw{AlwaysAllowDNS: &f}
+		c, err := raw.toConfig()
+		require.NoError(t, err)
+		assert.False(t, c.AlwaysAllowDNS, "explicit false should yield false")
+	})
+
+	t.Run("explicit true yields true", func(t *testing.T) {
+		t.Parallel()
+		tr := true
+		raw := configRaw{AlwaysAllowDNS: &tr}
+		c, err := raw.toConfig()
+		require.NoError(t, err)
+		assert.True(t, c.AlwaysAllowDNS, "explicit true should yield true")
+	})
+}
+
+// TestLoadYAML_AlwaysAllowDNS tests YAML unmarshalling of always_allow_dns.
+func TestLoadYAML_AlwaysAllowDNS(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	t.Run("explicit false in YAML yields false", func(t *testing.T) {
+		t.Parallel()
+		cfgPath := filepath.Join(tmpDir, "config_false.yaml")
+		yamlContent := `
+cluster_cidrs: ["10.0.0.0/8"]
+always_allow_dns: false
+`
+		require.NoError(t, os.WriteFile(cfgPath, []byte(yamlContent), 0644))
+		c, err := Load(cfgPath)
+		require.NoError(t, err)
+		assert.False(t, c.AlwaysAllowDNS, "always_allow_dns: false should produce false")
+	})
+
+	t.Run("omitted always_allow_dns defaults to true", func(t *testing.T) {
+		t.Parallel()
+		cfgPath := filepath.Join(tmpDir, "config_omitted.yaml")
+		yamlContent := `
+cluster_cidrs: ["10.0.0.0/8"]
+`
+		require.NoError(t, os.WriteFile(cfgPath, []byte(yamlContent), 0644))
+		c, err := Load(cfgPath)
+		require.NoError(t, err)
+		assert.True(t, c.AlwaysAllowDNS, "omitted always_allow_dns should default to true")
+	})
+
+	t.Run("explicit true in YAML yields true", func(t *testing.T) {
+		t.Parallel()
+		cfgPath := filepath.Join(tmpDir, "config_true.yaml")
+		yamlContent := `
+cluster_cidrs: ["10.0.0.0/8"]
+always_allow_dns: true
+`
+		require.NoError(t, os.WriteFile(cfgPath, []byte(yamlContent), 0644))
+		c, err := Load(cfgPath)
+		require.NoError(t, err)
+		assert.True(t, c.AlwaysAllowDNS, "always_allow_dns: true should produce true")
+	})
+}
+
+// TestMerge_AlwaysAllowDNS tests that Merge does not clobber explicit false.
+func TestMerge_AlwaysAllowDNS(t *testing.T) {
+	t.Parallel()
+
+	t.Run("explicit false in user config stays false after Merge", func(t *testing.T) {
+		t.Parallel()
+		c := Config{AlwaysAllowDNS: false}
+		c.Merge(Default())
+		assert.False(t, c.AlwaysAllowDNS, "Merge must not clobber explicit false")
+	})
+
+	t.Run("true persists after Merge", func(t *testing.T) {
+		t.Parallel()
+		c := Config{AlwaysAllowDNS: true}
+		c.Merge(Default())
+		assert.True(t, c.AlwaysAllowDNS)
+	})
+}
+
+// TestValidate_EgressAllowWorld tests EgressAllowWorld validation in Validate().
+func TestValidate_EgressAllowWorld(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		svc     PublicServiceSpec
+		wantErr bool
+	}{
+		{
+			name: "egress_allow_world with no ports rejects",
+			svc: PublicServiceSpec{
+				Namespace:        "kube-system",
+				Name:             "my-svc",
+				Ports:            nil,
+				EgressAllowWorld: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "egress_allow_world with empty ports rejects",
+			svc: PublicServiceSpec{
+				Namespace:        "ns",
+				Name:             "svc",
+				Ports:            []PortSpec{},
+				EgressAllowWorld: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "egress_allow_world with valid ports accepted",
+			svc: PublicServiceSpec{
+				Namespace:        "kube-system",
+				Name:             "kube-dns",
+				Ports:            []PortSpec{{Protocol: "UDP", Port: 53}},
+				EgressAllowWorld: true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "egress_allow_world false with no ports accepted",
+			svc: PublicServiceSpec{
+				Namespace:        "ns",
+				Name:             "svc",
+				Ports:            nil,
+				EgressAllowWorld: false,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := Default()
+			c.PublicServices = []PublicServiceSpec{tt.svc}
+			err := c.Validate()
+			if tt.wantErr {
+				require.Error(t, err, "Validate() should return error for %s", tt.name)
+			} else {
+				assert.NoError(t, err, "Validate() should not error for %s", tt.name)
+			}
+		})
+	}
+}
+
+// TestValidate_PublicServices_Port70000 verifies existing port-range validation still works.
+func TestValidate_PublicServices_Port70000(t *testing.T) {
+	t.Parallel()
+
+	c := Default()
+	c.PublicServices = []PublicServiceSpec{{
+		Namespace: "kube-system",
+		Name:      "kube-dns",
+		Ports:     []PortSpec{{Protocol: "UDP", Port: 70000}},
+	}}
+	err := c.Validate()
+	require.Error(t, err, "Validate() must reject port 70000")
+	assert.Contains(t, err.Error(), "public_services")
+	assert.Contains(t, err.Error(), "70000")
+}
+
+// TestLoadYAML_EgressPorts tests that YAML with egress_ports loads correctly.
+func TestLoadYAML_EgressPorts(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+cluster_cidrs: ["10.0.0.0/8"]
+public_services:
+  - namespace: "default"
+    name: "my-svc"
+    ports:
+      - protocol: "TCP"
+        port: 80
+    egress_ports:
+      - protocol: "TCP"
+        port: 80
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(yamlContent), 0644))
+
+	c, err := Load(cfgPath)
+	require.NoError(t, err)
+	require.Len(t, c.PublicServices, 1)
+	assert.Equal(t, "my-svc", c.PublicServices[0].Name)
+	require.Len(t, c.PublicServices[0].EgressPorts, 1)
+	assert.Equal(t, PortSpec{Protocol: "TCP", Port: 80}, c.PublicServices[0].EgressPorts[0])
+}
+
+// TestValidate_EgressPorts tests Validate() rejects invalid egress ports.
+func TestValidate_EgressPorts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		svc    PublicServiceSpec
+		errSub string
+	}{
+		{
+			name: "port 0 rejected",
+			svc: PublicServiceSpec{
+				Namespace:   "default",
+				Name:        "my-svc",
+				EgressPorts: []PortSpec{{Protocol: "TCP", Port: 0}},
+			},
+			errSub: "egress_ports",
+		},
+		{
+			name: "port 70000 rejected",
+			svc: PublicServiceSpec{
+				Namespace:   "default",
+				Name:        "my-svc",
+				EgressPorts: []PortSpec{{Protocol: "TCP", Port: 70000}},
+			},
+			errSub: "egress_ports",
+		},
+		{
+			name: "empty protocol rejected",
+			svc: PublicServiceSpec{
+				Namespace:   "default",
+				Name:        "my-svc",
+				EgressPorts: []PortSpec{{Protocol: "", Port: 80}},
+			},
+			errSub: "protocol must not be empty",
+		},
+		{
+			name: "valid egress ports accepted",
+			svc: PublicServiceSpec{
+				Namespace:   "default",
+				Name:        "my-svc",
+				EgressPorts: []PortSpec{{Protocol: "TCP", Port: 80}, {Protocol: "UDP", Port: 53}},
+				Ports:       []PortSpec{{Protocol: "TCP", Port: 80}},
+			},
+			errSub: "",
+		},
+		{
+			name: "negative port rejected",
+			svc: PublicServiceSpec{
+				Namespace:   "default",
+				Name:        "my-svc",
+				EgressPorts: []PortSpec{{Protocol: "TCP", Port: -1}},
+			},
+			errSub: "egress_ports",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := Default()
+			c.PublicServices = []PublicServiceSpec{tt.svc}
+			err := c.Validate()
+			if tt.errSub == "" {
+				assert.NoError(t, err, "Validate() should accept valid egress_ports")
+			} else {
+				require.Error(t, err, "Validate() should reject invalid egress_ports")
+				assert.Contains(t, err.Error(), tt.errSub)
+			}
+		})
+	}
+}
+
+// TestMerge_EgressPorts tests that Merge fills EgressPorts when user config omits it.
+func TestMerge_EgressPorts(t *testing.T) {
+	t.Parallel()
+
+	// Empty config: PublicServices from defaults carry no EgressPorts,
+	// and since PublicServices is replaced wholesale, EgressPorts are not filled individually.
+	c1 := Config{PublicServices: []PublicServiceSpec{}}
+	c1.Merge(Default())
+	require.Len(t, c1.PublicServices, 2, "empty PublicServices gets defaults via Merge")
+
+	// Each default service has empty EgressPorts — verify this is intentional (no defaults).
+	// (Merge does NOT recurse into PublicServiceSpec fields.)
+	for _, svc := range c1.PublicServices {
+		assert.Empty(t, svc.EgressPorts, "default PublicServices have no EgressPorts")
+	}
+
+	// Non-empty config overrides entirely — no merge into individual services.
+	c2 := Config{
+		PublicServices: []PublicServiceSpec{{
+			Namespace:   "kube-system",
+			Name:        "kube-dns",
+			Ports:       []PortSpec{{Protocol: "UDP", Port: 53}},
+			EgressPorts: []PortSpec{{Protocol: "TCP", Port: 80}},
+		}},
+	}
+	c2.Merge(Default())
+	require.Len(t, c2.PublicServices, 1)
+	assert.Equal(t, "kube-dns", c2.PublicServices[0].Name)
+	require.Len(t, c2.PublicServices[0].EgressPorts, 1)
+	assert.Equal(t, PortSpec{Protocol: "TCP", Port: 80}, c2.PublicServices[0].EgressPorts[0])
 }

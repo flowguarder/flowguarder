@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flowguarder/flowguarder/pkg/anomaly"
 	"github.com/flowguarder/flowguarder/pkg/analyze"
+	"github.com/flowguarder/flowguarder/pkg/anomaly"
 	"github.com/flowguarder/flowguarder/pkg/config"
 	"github.com/flowguarder/flowguarder/pkg/flow"
 )
@@ -51,6 +51,10 @@ type IngressRule struct {
 	// FromWorkloads lists workload selectors (label format or "namespace/name")
 	// that are permitted to send traffic.
 	FromWorkloads []string
+	// FromEntities lists entity sentinels (e.g. "entity:host") for reserved
+	// peers; consumed ONLY by the Cilium renderer; the NetPol renderer ignores
+	// this field.
+	FromEntities []string
 	// Ports lists the permitted L4 ports.
 	Ports []PortSpec
 	// Description is a human-readable note for this rule.
@@ -61,8 +65,14 @@ type IngressRule struct {
 type EgressRule struct {
 	// ToWorkloads lists workload selectors permitted to receive traffic.
 	ToWorkloads []string
+	// ToNamespaces lists namespaces whose pods are permitted to receive traffic (DNS fallback).
+	ToNamespaces []string
 	// ToCIDRs lists permitted CIDR ranges (for world egress).
 	ToCIDRs []string
+	// ToEntities lists entity sentinels (e.g. "entity:host") for reserved
+	// peers; consumed ONLY by the Cilium renderer; the NetPol renderer ignores
+	// this field.
+	ToEntities []string
 	// ToPorts lists the permitted L4 ports for workload egress.
 	ToPorts []PortSpec
 	// Description is a human-readable note for this rule.
@@ -135,10 +145,11 @@ type observedWl struct {
 
 // flowKey groups flows by source/dest + port + proto.
 type flowKey struct {
-	peer  string
-	port  uint16
-	proto string
-	cidr  string // "world" for public egress, "" for pod-pod
+	peer     string
+	port     uint16
+	proto    string
+	cidr     string // "world" for public egress, "" for pod-pod
+	entities string // reserved entity sentinel from reservedEntities(), "" if none
 }
 
 // flowEntry accumulates counts and timestamps.
@@ -156,23 +167,6 @@ type flowEntry struct {
 // Output is deterministic: policies are sorted by WorkloadID.
 // Skips workloads with zero observed traffic patterns and logs a warning.
 func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Workloads, anomalies []anomaly.Anomaly, opts BuildOptions) []Policy {
-	// Filter anomalies.
-	if len(opts.ExcludeAnomalyTypes) > 0 {
-		anomalies = nil
-		for _, a := range anomalies {
-			skip := false
-			for _, et := range opts.ExcludeAnomalyTypes {
-				if a.Type == et {
-					skip = true
-					break
-				}
-			}
-			if !skip {
-				anomalies = append(anomalies, a)
-			}
-		}
-	}
-
 	// Build observed-workload set and aggregation maps.
 	isObserved := make(map[string]bool, len(workloads))
 	agg := make(map[string]*observedWl)
@@ -210,14 +204,15 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 		case flow.Ingress, flow.Internal:
 			// Traffic entering dstKey from srcKey.
 			var cidr string
+			var entities string
 			dstIP := net.ParseIP(f.Destination.IP)
 			srcIP := net.ParseIP(f.Source.IP)
-			isWorldIngress := (dstIP != nil && srcIP != nil && analyze.IsPublicIP(srcIP) && analyze.IsPrivateIP(dstIP, nil)) ||
-				isSyntheticEndpoint(f.Source) ||
-				f.PeerType == flow.KubeAPIServer
-			if isWorldIngress {
-				cidr = "world"
-				if opts.Config != nil {
+			isWorldIngress := dstIP != nil && srcIP != nil && analyze.IsPublicIP(srcIP) && analyze.IsPrivateIP(dstIP, nil)
+			if isSyntheticEndpoint(f.Source) {
+				cidr = classifySyntheticPeer(srcIP, opts.Config)
+				entities = reservedEntities(f.Source)
+				// Scope apiserver-port override: only the actual kube-apiserver peer triggers it.
+				if isKubeAPIServerPeer(f.Source, opts.Config) && opts.Config != nil {
 					for _, ps := range opts.Config.ApiserverIngressPorts {
 						if f.Layer4.DestPort == uint16(ps.Port) && string(f.Layer4.Protocol) == ps.Protocol {
 							cidr = "apiserver"
@@ -225,8 +220,17 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 						}
 					}
 				}
+			} else if isWorldIngress {
+				cidr = "world"
+			} else if opts.Config != nil && isKubeAPIServerPeer(f.Source, opts.Config) {
+				for _, ps := range opts.Config.ApiserverIngressPorts {
+					if f.Layer4.DestPort == uint16(ps.Port) && string(f.Layer4.Protocol) == ps.Protocol {
+						cidr = "apiserver"
+						break
+					}
+				}
 			}
-			k := flowKey{peer: srcKey, port: port, proto: proto, cidr: cidr}
+			k := flowKey{peer: srcKey, port: port, proto: proto, cidr: cidr, entities: entities}
 			e := agg[dstKey].ingress[k]
 			if e == nil {
 				e = &flowEntry{}
@@ -246,14 +250,15 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 		case flow.Egress:
 			// Traffic leaving srcKey toward dstKey.
 			var cidr string
+			var entities string
 			dstIP := net.ParseIP(f.Destination.IP)
 			srcIP := net.ParseIP(f.Source.IP)
-			isWorldEgress := (dstIP != nil && srcIP != nil && analyze.IsPublicIP(dstIP) && analyze.IsPrivateIP(srcIP, nil)) ||
-				isSyntheticEndpoint(f.Destination) ||
-				f.PeerType == flow.KubeAPIServer
-			if isWorldEgress {
-				cidr = "world"
-				if opts.Config != nil {
+			isWorldEgress := dstIP != nil && srcIP != nil && analyze.IsPublicIP(dstIP) && analyze.IsPrivateIP(srcIP, nil)
+			if isSyntheticEndpoint(f.Destination) {
+				cidr = classifySyntheticPeer(dstIP, opts.Config)
+				entities = reservedEntities(f.Destination)
+				// Scope apiserver-port override: only the actual kube-apiserver peer triggers it.
+				if isKubeAPIServerPeer(f.Destination, opts.Config) && opts.Config != nil {
 					for _, ps := range opts.Config.ApiserverEgressPorts {
 						if f.Layer4.DestPort == uint16(ps.Port) && string(f.Layer4.Protocol) == ps.Protocol {
 							cidr = "apiserver"
@@ -261,8 +266,17 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 						}
 					}
 				}
+			} else if isWorldEgress {
+				cidr = "world"
+			} else if opts.Config != nil && isKubeAPIServerPeer(f.Destination, opts.Config) {
+				for _, ps := range opts.Config.ApiserverEgressPorts {
+					if f.Layer4.DestPort == uint16(ps.Port) && string(f.Layer4.Protocol) == ps.Protocol {
+						cidr = "apiserver"
+						break
+					}
+				}
 			}
-			k := flowKey{peer: dstKey, port: port, proto: proto, cidr: cidr}
+			k := flowKey{peer: dstKey, port: port, proto: proto, cidr: cidr, entities: entities}
 			e := agg[srcKey].egress[k]
 			if e == nil {
 				e = &flowEntry{}
@@ -270,7 +284,7 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 			}
 			e.count++
 			e.updateTime(f.Time)
-            if f.L7 != nil {
+			if f.L7 != nil {
 				if f.L7.Type == "dns" {
 					e.hasL7DNS = true
 				}
@@ -281,7 +295,13 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 
 			// Symmetric ingress: mirror egress for non-synthetic, non-world destinations.
 			if cidr == "" && !isSyntheticEndpoint(f.Destination) {
-				ik := flowKey{peer: srcKey, port: port, proto: proto, cidr: ""}
+				var mirrorCIDR string
+				var mirrorEntities string
+				if isSyntheticEndpoint(f.Source) {
+					mirrorCIDR = classifySyntheticPeer(srcIP, opts.Config)
+					mirrorEntities = reservedEntities(f.Source)
+				}
+				ik := flowKey{peer: srcKey, port: port, proto: proto, cidr: mirrorCIDR, entities: mirrorEntities}
 				ie := agg[dstKey].ingress[ik]
 				if ie == nil {
 					ie = &flowEntry{}
@@ -293,7 +313,7 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 					if f.L7.Type == "dns" {
 						ie.hasL7DNS = true
 					}
-					if f.L7.Type == "http" || f.L7.Type == "tls" {
+					if f.L7.Type == "http" {
 						ie.hasL7HTTP = true
 					}
 				}
@@ -341,12 +361,109 @@ func Build(flows []flow.Flow, patterns []anomaly.Pattern, workloads analyze.Work
 	return policies
 }
 
+// reservedEntities extracts reserved:* label keys from an endpoint, strips the
+// "reserved:" prefix, sorts the results, joins with ",", and returns
+// "entity:<list>". Returns "" if the endpoint has no reserved:* labels.
+//
+// Labels are sorted so output is deterministic regardless of map iteration order.
+func reservedEntities(ep flow.Endpoint) string {
+	var ids []string
+	for k := range ep.Labels {
+		if strings.HasPrefix(k, "reserved:") {
+			ids = append(ids, k[len("reserved:"):])
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	sort.Strings(ids)
+	return "entity:" + strings.Join(ids, ",")
+}
+
+// isKubeAPIServerPeer returns true when the endpoint represents the kube-apiserver
+// workload — either by carrying the reserved:kube-apiserver label key, or by
+// matching Config.ApiserverWorkloadSelector when that is configured.
+func isKubeAPIServerPeer(ep flow.Endpoint, cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if _, ok := ep.Labels["reserved:kube-apiserver"]; ok {
+		return true
+	}
+	wl := analyze.ResolveWorkload(ep)
+	return isKubeAPIServerWorkload(wKey(ep.Namespace, wl.Name), wl, cfg.ApiserverWorkloadSelector)
+}
+
 // isSyntheticEndpoint returns true when the endpoint resolves to a synthetic
 // workload (pvt, pub, or unknown "-"). Used as a fallback for world CIDR
 // detection when the Goldmane parser sets all flow IPs to 0.0.0.0.
 func isSyntheticEndpoint(ep flow.Endpoint) bool {
 	wl := analyze.ResolveWorkload(ep)
-	return wl.Name == "pvt" || wl.Name == "pub" || wl.Name == "-"
+	if wl.Name == "pvt" || wl.Name == "pub" || wl.Name == "-" {
+		return true
+	}
+	for k := range ep.Labels {
+		if strings.HasPrefix(k, "reserved:") {
+			return true
+		}
+	}
+	return false
+}
+
+// classifySyntheticPeer determines the CIDR string for a synthetic peer endpoint
+// based on its IP and the configured APIServerCIDRs.
+// Returns "apiserver" if the IP is within any APIServerCIDR,
+// returns "ip/32" if the IP is private (internal node/peer CIDR),
+// returns "world" for public or unparseable IPs.
+func classifySyntheticPeer(ip net.IP, cfg *config.Config) string {
+	if ip == nil || ip.String() == "" {
+		return "world"
+	}
+	// Check APIServerCIDRs against the parsed 4-byte IP for reliable CIDR matching.
+	if cfg != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			p4 := make(net.IP, 4)
+			copy(p4, ipv4)
+			if analyze.IsKubeAPIServerIP(p4, cfg.APIServerCIDRs) {
+				return "apiserver"
+			}
+		}
+	}
+	// Private IP → emit specific /32 CIDR (internal node/peer).
+	if analyze.IsPrivateIP(ip, nil) {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return ipv4.String() + "/32"
+		}
+		return ip.String() + "/32"
+	}
+	// Public or unparseable → world.
+	return "world"
+}
+
+// isKubeAPIServerWorkload returns true when the given workload (identified by
+// its "namespace/name" ID and resolved Workload struct) matches the supplied
+// selector.
+//
+// When selector is nil the function returns false.
+// When the workload's Namespace or Name is empty the function falls back to
+// parsing id as "namespace/name" via strings.IndexByte.  If id also lacks "/"
+// the function returns false.
+func isKubeAPIServerWorkload(id string, wl analyze.Workload, selector *config.WorkloadSelector) bool {
+	if selector == nil {
+		return false
+	}
+	ns := wl.Namespace
+	name := wl.Name
+	if ns == "" || name == "" {
+		if idx := strings.IndexByte(id, '/'); idx > 0 {
+			ns = id[:idx]
+			name = id[idx+1:]
+		}
+	}
+	if ns == "" || name == "" {
+		return false
+	}
+	return ns == selector.Namespace && name == selector.Name
 }
 
 func isSyntheticWorkload(id string, w analyze.Workload) bool {
@@ -443,12 +560,171 @@ func buildPolicyFromAgg(id string, wd analyze.Workload, pw *observedWl, workload
 
 	p.EgressRules = buildEgressRules(pw.egress, wd.Namespace, workloads)
 
-	// Add default-deny stub when requested.
-	if opts.DefaultDeny && len(p.IngressRules) > 0 {
-		p.IngressRules = append(p.IngressRules, IngressRule{Description: "default deny-all ingress"})
+	// Synthesize egress rules from PublicServiceSpec.EgressPorts for long-lived
+	// infrastructure connections (e.g. hubble-peer:80).  Even when only reply
+	// flows were observed in the input, the workload needs an egress rule to
+	// reach those infrastructure endpoints.  Dual-carry: ToEntities=["entity:world"]
+	// AND ToCIDRs=["0.0.0.0/0"] so CNP renders toEntities: [world] and NP
+	// renders 0.0.0.0/0.  Dedup WITHIN the synthesized rule only.
+	if !opts.Strict && opts.Config != nil {
+		for _, svc := range opts.Config.PublicServices {
+			if svc.Namespace == wd.Namespace && svc.Name == wd.Name && len(svc.EgressPorts) > 0 {
+				seenPorts := make(map[string]bool)
+				var ports []PortSpec
+				for _, ep := range svc.EgressPorts {
+					k := portKey(uint16(ep.Port), ep.Protocol)
+					if seenPorts[k] {
+						continue
+					}
+					seenPorts[k] = true
+					ports = append(ports, PortSpec{
+						Port:        uint16(ep.Port),
+						Protocol:    ep.Protocol,
+						Description: "infrastructure egress",
+					})
+				}
+				if len(ports) > 0 {
+					sort.Slice(ports, func(i, j int) bool {
+						return portKey(ports[i].Port, ports[i].Protocol) < portKey(ports[j].Port, ports[j].Protocol)
+					})
+					p.EgressRules = append(p.EgressRules, EgressRule{
+						ToEntities:  []string{"entity:world"},
+						ToCIDRs:     []string{"0.0.0.0/0"},
+						ToPorts:     ports,
+						Description: "egress infrastructure (synthesized)",
+					})
+				}
+			}
+		}
+	}
+
+	// Complete observed kube-dns rule or synthesize if needed.
+	if !opts.Strict && opts.Config != nil && opts.Config.AlwaysAllowDNS && len(p.EgressRules) > 0 {
+		if !completeKubeDNSRule(p.EgressRules, opts.Config) {
+			p.EgressRules = append(p.EgressRules, buildDNSEgressRule(workloads, opts.Config.KubeDNSPorts))
+			sortEgressRules(p.EgressRules)
+		}
 	}
 
 	return p
+}
+
+// completeKubeDNSRule finds observed egress rules targeting kube-dns (by
+// workload ID, namespace, or name matching kube-dns/coredns) and appends any
+// missing configured DNS ports to the FIRST matching rule so that every
+// workload with an observed kube-dns egress rule carries ALL configured DNS
+// ports in a single rule.  Returns true when a matching rule was found (so
+// the caller skips synthesis).
+func completeKubeDNSRule(rules []EgressRule, cfg *config.Config) bool {
+	dnsPorts := config.DefaultKubeDNSPorts
+	if cfg != nil && len(cfg.KubeDNSPorts) > 0 {
+		dnsPorts = cfg.KubeDNSPorts
+	}
+
+	cfgPorts := make(map[string]config.PortSpec)
+	for _, ps := range dnsPorts {
+		k := portKey(uint16(ps.Port), strings.ToUpper(ps.Protocol))
+		cfgPorts[k] = ps
+	}
+
+	cfgKeys := make([]string, 0, len(cfgPorts))
+	for k := range cfgPorts {
+		cfgKeys = append(cfgKeys, k)
+	}
+
+	var matched []int
+	for i, r := range rules {
+		if !isKubeDNSRule(r, cfgPorts) {
+			continue
+		}
+		matched = append(matched, i)
+	}
+	if len(matched) == 0 {
+		return false
+	}
+
+	covered := make(map[string]bool)
+	for _, idx := range matched {
+		for _, rp := range rules[idx].ToPorts {
+			k := portKey(rp.Port, strings.ToUpper(rp.Protocol))
+			if cfgPorts[k] != (config.PortSpec{}) {
+				covered[k] = true
+			}
+		}
+	}
+
+	var missing []PortSpec
+	for _, k := range cfgKeys {
+		if !covered[k] {
+			ps := cfgPorts[k]
+			missing = append(missing, PortSpec{
+				Port:        uint16(ps.Port),
+				Protocol:    ps.Protocol,
+				Description: "DNS",
+			})
+		}
+	}
+
+	if len(missing) == 0 {
+		return true
+	}
+
+	firstIdx := matched[0]
+	for _, mp := range missing {
+		rules[firstIdx].ToPorts = append(rules[firstIdx].ToPorts, PortSpec{
+			Port:        mp.Port,
+			Protocol:    mp.Protocol,
+			Description: mp.Description,
+		})
+	}
+
+	sort.Slice(rules[firstIdx].ToPorts, func(i, j int) bool {
+		return portKey(rules[firstIdx].ToPorts[i].Port, strings.ToUpper(rules[firstIdx].ToPorts[i].Protocol)) <
+			portKey(rules[firstIdx].ToPorts[j].Port, strings.ToUpper(rules[firstIdx].ToPorts[j].Protocol))
+	})
+
+	return true
+}
+
+// isKubeDNSRule reports whether an egress rule targets kube-dns AND covers
+// at least one configured DNS port — the compound predicate matching the
+// original hasObservedDNSRuleTargetingKubeDNS semantics.
+func isKubeDNSRule(r EgressRule, cfgPorts map[string]config.PortSpec) bool {
+	hasOne := false
+	for _, rp := range r.ToPorts {
+		k := portKey(rp.Port, strings.ToUpper(rp.Protocol))
+		if cfgPorts[k] != (config.PortSpec{}) {
+			hasOne = true
+			break
+		}
+	}
+	if !hasOne {
+		return false
+	}
+	return isKubeDNSRuleTarget(r)
+}
+
+// isKubeDNSRuleTarget reports whether an egress rule targets kube-dns by
+// workload ID, namespace, or name matching kube-dns/coredns.
+func isKubeDNSRuleTarget(r EgressRule) bool {
+	for _, tw := range r.ToWorkloads {
+		if tw == "kube-system/kube-dns" {
+			return true
+		}
+		if strings.Contains(tw, "kube-system/") {
+			name := strings.TrimPrefix(tw, "kube-system/")
+			nameLower := strings.ToLower(name)
+			if strings.Contains(nameLower, "kube-dns") || strings.Contains(nameLower, "coredns") {
+				return true
+			}
+		}
+	}
+	for _, ns := range r.ToNamespaces {
+		if ns == "kube-system" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildIngressRules converts ingress aggregation into IngressRule slices.
@@ -489,7 +765,14 @@ func buildIngressRules(ingress map[flowKey]*flowEntry, policyNs string, workload
 	var apiserverPorts []PortSpec
 	apiserverSeenPorts := make(map[string]bool)
 
-	// Collect per-peer port entries: non-world, non-apiserver, non-public-service flows grouped by peer.
+	// Collect generic CIDR ports (e.g. /32 node IPs not matching "world"/"apiserver").
+	type cidrPortsEntry struct {
+		key   peerPortKey
+		entry *flowEntry
+	}
+	cidrPorts := make(map[string][]cidrPortsEntry)
+
+	// Collect per-peer port entries: non-world, non-apiserver, non-cidr, non-public-service flows grouped by peer.
 	peerPorts := make(map[string][]struct {
 		key peerPortKey
 		e   *flowEntry
@@ -497,9 +780,27 @@ func buildIngressRules(ingress map[flowKey]*flowEntry, policyNs string, workload
 	var nonWorldPeers []string
 	seenPeer := make(map[string]bool)
 
+	// Collect entity bucket: entity sentinel -> set of cidr twins + ports.
+	type entityPortsEntry struct {
+		kp   peerPortKey
+		e    *flowEntry
+		cidr string
+	}
+	entityPorts := make(map[string][]entityPortsEntry)
+
 	for k, v := range ingress {
 		// Skip entries matched by PublicServices shortcut.
 		if psMatchedKeys[k] {
+			continue
+		}
+
+		// Entity sentinel check FIRST: reserved peer produces one rule per entity.
+		if k.entities != "" {
+			entityPorts[k.entities] = append(entityPorts[k.entities], entityPortsEntry{
+				kp:   peerPortKey{port: k.port, proto: k.proto},
+				e:    v,
+				cidr: k.cidr,
+			})
 			continue
 		}
 
@@ -540,6 +841,15 @@ func buildIngressRules(ingress map[flowKey]*flowEntry, policyNs string, workload
 					Description: desc,
 				})
 			}
+			continue
+		}
+
+		// Generic CIDR (e.g. /32 node IPs) — any non-empty cidr not "world"/"apiserver".
+		if k.cidr != "" {
+			cidrPorts[k.cidr] = append(cidrPorts[k.cidr], cidrPortsEntry{
+				key:   peerPortKey{port: k.port, proto: k.proto},
+				entry: v,
+			})
 			continue
 		}
 
@@ -629,6 +939,115 @@ func buildIngressRules(ingress map[flowKey]*flowEntry, policyNs string, workload
 		})
 	}
 
+	// Entity rules: one IngressRule per entity sentinel, carrying BOTH the
+	// CIDR twin (FromWorkloads) and the entity sentinel (FromEntities).
+	if len(entityPorts) > 0 {
+		entityKeys := make([]string, 0, len(entityPorts))
+		for k := range entityPorts {
+			entityKeys = append(entityKeys, k)
+		}
+		sort.Strings(entityKeys)
+		for _, ek := range entityKeys {
+			entries := entityPorts[ek]
+			seenCidrs := make(map[string]bool)
+			for _, ep := range entries {
+				if ep.cidr != "" {
+					cidrTwin := ep.cidr
+					if cidrTwin == "world" {
+						cidrTwin = "0.0.0.0/0"
+					}
+					seenCidrs[cidrTwin] = true
+				}
+			}
+			twinCidrs := make([]string, 0, len(seenCidrs))
+			for c := range seenCidrs {
+				twinCidrs = append(twinCidrs, c)
+			}
+			sort.Strings(twinCidrs)
+
+			// Dedup ports by (proto, port) keeping first-seen.
+			seenPortKeys := make(map[string]bool)
+			var portSpecs []PortSpec
+			for _, ep := range entries {
+				pk := portKey(ep.kp.port, ep.kp.proto)
+				if seenPortKeys[pk] {
+					continue
+				}
+				seenPortKeys[pk] = true
+				desc := countDesc(ep.e.count)
+				if ep.e.hasL7DNS {
+					desc += " (L7 DNS)"
+				}
+				if ep.e.hasL7HTTP {
+					desc += " (L7 HTTP)"
+				}
+				portSpecs = append(portSpecs, PortSpec{
+					Port:        ep.kp.port,
+					Protocol:    ep.kp.proto,
+					Description: desc,
+				})
+			}
+			sort.Slice(portSpecs, func(i, j int) bool {
+				if portSpecs[i].Port != portSpecs[j].Port {
+					return portSpecs[i].Port < portSpecs[j].Port
+				}
+				return portSpecs[i].Protocol < portSpecs[j].Protocol
+			})
+			rules = append(rules, IngressRule{
+				FromWorkloads: twinCidrs,
+				FromEntities:  []string{ek},
+				Ports:         portSpecs,
+				Description:   "ingress",
+			})
+		}
+	}
+
+	// Generic CIDR peers: emit one IngressRule per sorted CIDR key.
+	if len(cidrPorts) > 0 {
+		cidrKeys := make([]string, 0, len(cidrPorts))
+		for k := range cidrPorts {
+			cidrKeys = append(cidrKeys, k)
+		}
+		sort.Strings(cidrKeys)
+		for _, ck := range cidrKeys {
+			entries := cidrPorts[ck]
+			// Dedup ports by (proto, port) keeping first-seen.
+			seenPortKeys := make(map[string]bool)
+			var portSpecs []PortSpec
+			for _, e := range entries {
+				kk := e.key
+				pk := portKey(kk.port, kk.proto)
+				if seenPortKeys[pk] {
+					continue
+				}
+				seenPortKeys[pk] = true
+				desc := countDesc(e.entry.count)
+				if e.entry.hasL7DNS {
+					desc += " (L7 DNS)"
+				}
+				if e.entry.hasL7HTTP {
+					desc += " (L7 HTTP)"
+				}
+				portSpecs = append(portSpecs, PortSpec{
+					Port:        kk.port,
+					Protocol:    kk.proto,
+					Description: desc,
+				})
+			}
+			sort.Slice(portSpecs, func(i, j int) bool {
+				if portSpecs[i].Port != portSpecs[j].Port {
+					return portSpecs[i].Port < portSpecs[j].Port
+				}
+				return portSpecs[i].Protocol < portSpecs[j].Protocol
+			})
+			rules = append(rules, IngressRule{
+				FromWorkloads: []string{ck},
+				Ports:         portSpecs,
+				Description:   "ingress",
+			})
+		}
+	}
+
 	// One IngressRule per non-world peer, scoped to that peer's ports only.
 	for _, peer := range nonWorldPeers {
 		entries := peerPorts[peer]
@@ -683,15 +1102,52 @@ func buildEgressRules(egress map[flowKey]*flowEntry, policyNs string, workloads 
 
 	// Group entries by peer (toWorkloads) and by CIDR (toCIDRs).
 	type keyedPorts struct {
-		key    string
-		ports  []PortSpec
-		hasL7  string
+		key   string
+		ports []PortSpec
+		hasL7 string
 	}
-	peerMap := make(map[string]*keyedPorts)  // peerID -> ports
-	cidrMap := make(map[string]*keyedPorts)  // cidrID -> ports
+	peerMap := make(map[string]*keyedPorts) // peerID -> ports
+	cidrMap := make(map[string]*keyedPorts) // cidrID -> ports
+	// entityMap: entity sentinel -> set of cidr twins + ports
+	type entityKeyedPorts struct {
+		cidrsSet map[string]bool
+		ports    []PortSpec
+	}
+	entityMap := make(map[string]*entityKeyedPorts)
 
 	for k, v := range egress {
-		if k.cidr == "" {
+		// Entity sentinel check FIRST: reserved peer produces one rule per entity.
+		if k.entities != "" {
+			if ep, ok := entityMap[k.entities]; ok {
+				ep.ports = appendIfNeeded(ep.ports, k.port, k.proto, v.count, v.hasL7DNS, v.hasL7HTTP)
+				if k.cidr != "" {
+					cidrTwin := k.cidr
+					if cidrTwin == "world" {
+						cidrTwin = "0.0.0.0/0"
+					}
+					ep.cidrsSet[cidrTwin] = true
+				}
+			} else {
+				var l7 string
+				if v.hasL7DNS {
+					l7 = " (L7 DNS)"
+				} else if v.hasL7HTTP {
+					l7 = " (L7 HTTP)"
+				}
+				cs := make(map[string]bool)
+				if k.cidr != "" {
+					cidrTwin := k.cidr
+					if cidrTwin == "world" {
+						cidrTwin = "0.0.0.0/0"
+					}
+					cs[cidrTwin] = true
+				}
+				entityMap[k.entities] = &entityKeyedPorts{
+					cidrsSet: cs,
+					ports:    []PortSpec{{Port: k.port, Protocol: k.proto, Description: countDesc(v.count) + l7}},
+				}
+			}
+		} else if k.cidr == "" {
 			// Peer-based rule.
 			if pp, ok := peerMap[k.peer]; ok {
 				pp.ports = appendIfNeeded(pp.ports, k.port, k.proto, v.count, v.hasL7DNS, v.hasL7HTTP)
@@ -761,25 +1217,138 @@ func buildEgressRules(egress map[flowKey]*flowEntry, policyNs string, workloads 
 		})
 	}
 
-	// Sort rules deterministically (ToWorkloads before ToCIDRs, then by first element).
+	// Entity egress rules: one rule per entity sentinel, carrying BOTH the
+	// CIDR twin (ToCIDRs) and the entity sentinel (ToEntities).
+	if len(entityMap) > 0 {
+		entityKeys := make([]string, 0, len(entityMap))
+		for k := range entityMap {
+			entityKeys = append(entityKeys, k)
+		}
+		sort.Strings(entityKeys)
+		for _, ek := range entityKeys {
+			ep := entityMap[ek]
+			if len(ep.ports) == 0 {
+				continue
+			}
+			// Sorted CIDR twins.
+			twinCidrs := make([]string, 0, len(ep.cidrsSet))
+			for c := range ep.cidrsSet {
+				twinCidrs = append(twinCidrs, c)
+			}
+			sort.Strings(twinCidrs)
+			rules = append(rules, EgressRule{
+				ToCIDRs:     twinCidrs,
+				ToEntities:  []string{ek},
+				ToPorts:     ep.ports,
+				Description: "egress",
+			})
+		}
+	}
+
+	// Sort rules deterministically (ToWorkloads before ToNamespaces before ToEntities before ToCIDRs, then by first element).
+	sortEgressRules(rules)
+
+	return rules
+}
+
+// findKubeDNSWorkload returns the first kube-dns workload ID in the
+// workloads map, searching kube-system namespace for names containing
+// "kube-dns" or "coredns" (case-insensitive), or any workload with a
+// label "k8s-app" matching "kube-dns" (case-insensitive).
+// Returns "" when no such workload is found.
+func findKubeDNSWorkload(workloads analyze.Workloads) string {
+	const (
+		k8sAppName      = "k8s-app"
+		kubeDNSLabelVal = "kube-dns"
+	)
+	for _, id := range workloads.SortedIDs() {
+		wd, ok := workloads[analyze.WorkloadID(id)]
+		if !ok {
+			continue
+		}
+		if wd.Namespace != "kube-system" {
+			continue
+		}
+		nameLower := strings.ToLower(wd.Name)
+		if strings.Contains(nameLower, "kube-dns") || strings.Contains(nameLower, "coredns") {
+			return id
+		}
+		if lbl, ok := wd.Labels[k8sAppName]; ok && strings.EqualFold(lbl, kubeDNSLabelVal) {
+			return id
+		}
+	}
+	return ""
+}
+
+// buildDNSEgressRule builds a DNS egress rule. If a kube-dns workload exists
+// in workloads it targets that workload by ID; otherwise it targets the
+// kube-system namespace. Ports come from dnsPorts or default to UDP/53 + TCP/53.
+func buildDNSEgressRule(workloads analyze.Workloads, dnsPorts []config.PortSpec) EgressRule {
+	ports := []PortSpec{
+		{Port: 53, Protocol: "UDP", Description: "DNS"},
+		{Port: 53, Protocol: "TCP", Description: "DNS"},
+	}
+	if len(dnsPorts) > 0 {
+		ports = make([]PortSpec, 0, len(dnsPorts))
+		for _, ps := range dnsPorts {
+			ports = append(ports, PortSpec{Port: uint16(ps.Port), Protocol: ps.Protocol, Description: "DNS"})
+		}
+	}
+
+	kubeDNSID := findKubeDNSWorkload(workloads)
+	if kubeDNSID != "" {
+		return EgressRule{
+			ToWorkloads: []string{kubeDNSID},
+			ToPorts:     ports,
+			Description: "egress DNS (always-allow)",
+		}
+	}
+	return EgressRule{
+		ToNamespaces: []string{"kube-system"},
+		ToPorts:      ports,
+		Description:  "egress DNS (always-allow)",
+	}
+}
+
+// sortEgressRules sorts an egress rules slice deterministically: rules with
+// ToWorkloads first, then ToNamespaces, then ToEntities, then ToCIDRs — each
+// partition sorted by the first element of its target field, then by
+// Description.
+func sortEgressRules(rules []EgressRule) {
 	sort.Slice(rules, func(i, j int) bool {
 		iW, jW := len(rules[i].ToWorkloads) > 0, len(rules[j].ToWorkloads) > 0
 		if iW != jW {
-			return iW // ToWorkloads rules first
+			return iW
 		}
 		if iW {
 			if rules[i].ToWorkloads[0] != rules[j].ToWorkloads[0] {
 				return rules[i].ToWorkloads[0] < rules[j].ToWorkloads[0]
 			}
-		} else {
+		} else if len(rules[i].ToNamespaces) > 0 || len(rules[j].ToNamespaces) > 0 {
+			iN, jN := len(rules[i].ToNamespaces) > 0, len(rules[j].ToNamespaces) > 0
+			if iN != jN {
+				return iN
+			}
+			if rules[i].ToNamespaces[0] != rules[j].ToNamespaces[0] {
+				return rules[i].ToNamespaces[0] < rules[j].ToNamespaces[0]
+			}
+			return rules[i].Description < rules[j].Description
+		} else if len(rules[i].ToEntities) > 0 && len(rules[j].ToEntities) > 0 {
+			if rules[i].ToEntities[0] != rules[j].ToEntities[0] {
+				return rules[i].ToEntities[0] < rules[j].ToEntities[0]
+			}
+			return rules[i].Description < rules[j].Description
+		} else if len(rules[i].ToEntities) > 0 {
+			return true
+		} else if len(rules[j].ToEntities) > 0 {
+			return false
+		} else if len(rules[i].ToCIDRs) > 0 && len(rules[j].ToCIDRs) > 0 {
 			if rules[i].ToCIDRs[0] != rules[j].ToCIDRs[0] {
 				return rules[i].ToCIDRs[0] < rules[j].ToCIDRs[0]
 			}
 		}
 		return rules[i].Description < rules[j].Description
 	})
-
-	return rules
 }
 
 // appendIfNeeded deduplicates ports by key and appends a new port/protocol

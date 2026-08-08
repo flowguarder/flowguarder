@@ -153,7 +153,7 @@ func TestIsPublicIP(t *testing.T) {
 func TestIsDNSPort(t *testing.T) {
 	assert.True(t, IsDNSPort(53, flow.UDP))
 	assert.True(t, IsDNSPort(53, flow.TCP))
-	assert.True(t, IsDNSPort(53, flow.ANY_P))
+	assert.True(t, IsDNSPort(53, flow.Any))
 	assert.False(t, IsDNSPort(443, flow.TCP))
 	assert.False(t, IsDNSPort(80, flow.UDP))
 	assert.False(t, IsDNSPort(25, flow.UDP))
@@ -194,17 +194,17 @@ func TestClassifyPeer(t *testing.T) {
 	baseFlow := flow.Flow{}
 
 	tests := []struct {
-		name    string
-		flow    flow.Flow
-		want    flow.PeerType
+		name string
+		flow flow.Flow
+		want flow.PeerType
 	}{
 		{
 			name: "ingress-world: src public, dst private",
 			flow: flow.Flow{
-				Source:    flow.Endpoint{IP: "8.8.8.8"},
+				Source:      flow.Endpoint{IP: "8.8.8.8"},
 				Destination: flow.Endpoint{IP: "10.0.0.1"},
-				Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-				Direction: flow.Ingress,
+				Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+				Direction:   flow.Ingress,
 			},
 			want: flow.IngressWorld,
 		},
@@ -394,9 +394,9 @@ func TestClassifyPeer_KubeAPIServerByLabel(t *testing.T) {
 	cfg := config.Default()
 
 	tests := []struct {
-		name     string
-		flow     flow.Flow
-		want     flow.PeerType
+		name string
+		flow flow.Flow
+		want flow.PeerType
 	}{
 		{
 			name: "private IP with reserved:kube-apiserver label",
@@ -433,6 +433,49 @@ func TestClassifyPeer_KubeAPIServerByLabel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ClassifyPeer(tt.flow, cfg)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestClassifyPeer_KubeAPIServerByLabel_EmptyValue(t *testing.T) {
+	// After todo 1, reserved labels are stored with EMPTY values, so != ""
+	// never matches. This test ensures presence-check works.
+	cfg := config.Default()
+
+	tests := []struct {
+		name string
+		fl   flow.Flow
+		want flow.PeerType
+	}{
+		{
+			name: "empty value reserved:kube-apiserver on destination",
+			fl: flow.Flow{
+				Source: flow.Endpoint{IP: "10.0.0.1"},
+				Destination: flow.Endpoint{
+					IP:     "192.168.107.3",
+					Labels: map[string]string{"reserved:kube-apiserver": ""},
+				},
+				Layer4: flow.Layer4{DestPort: 6443, Protocol: flow.TCP},
+			},
+			want: flow.KubeAPIServer,
+		},
+		{
+			name: "empty value reserved:kube-apiserver on source",
+			fl: flow.Flow{
+				Source: flow.Endpoint{
+					IP:     "192.168.107.3",
+					Labels: map[string]string{"reserved:kube-apiserver": ""},
+				},
+				Destination: flow.Endpoint{IP: "10.0.0.1"},
+			},
+			want: flow.KubeAPIServer,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyPeer(tt.fl, cfg)
 			assert.Equal(t, tt.want, got)
 		})
 	}

@@ -3,11 +3,10 @@ package anomaly
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/config"
 	"github.com/flowguarder/flowguarder/pkg/flow"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNamespaceDetector(t *testing.T) {
@@ -50,7 +49,7 @@ func TestNamespaceDetector(t *testing.T) {
 					"front": {"monitoring", "kube-system"},
 				},
 			},
-			expectCount:  1,
+			expectCount:   1,
 			checkSeverity: SeverityMedium,
 			checkEvidence: func(t *testing.T, a Anomaly) {
 				require.Contains(t, a.Evidence, "pair")

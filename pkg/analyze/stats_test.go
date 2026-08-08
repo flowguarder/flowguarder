@@ -58,13 +58,13 @@ func TestComputePatterns(t *testing.T) {
 	baseTime := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name         string
-		flows        []flow.Flow
-		workloads    Workloads
-		wantLen      int
-		wantKeys     []string
-		wantCounts   []uint64
-		wantBytes    []uint64
+		name       string
+		flows      []flow.Flow
+		workloads  Workloads
+		wantLen    int
+		wantKeys   []string
+		wantCounts []uint64
+		wantBytes  []uint64
 	}{
 		{
 			name:      "zero flows returns empty non-nil slice",
@@ -73,36 +73,36 @@ func TestComputePatterns(t *testing.T) {
 			wantLen:   0,
 		},
 		{
-			name: "empty flows slice returns empty non-nil slice",
-			flows: []flow.Flow{},
+			name:    "empty flows slice returns empty non-nil slice",
+			flows:   []flow.Flow{},
 			wantLen: 0,
 		},
 		{
 			name: "two same pattern + one different",
 			flows: []flow.Flow{
 				{
-					Time:      baseTime.Add(0),
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
+					Time:        baseTime.Add(0),
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
 					Destination: flow.Endpoint{Namespace: "production", PodName: "backend-bbb", Labels: map[string]string{"app": "backend"}},
-					Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-					Bytes:     1000,
+					Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+					Bytes:       1000,
 				},
 				{
-					Time:      baseTime.Add(1 * time.Minute),
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
+					Time:        baseTime.Add(1 * time.Minute),
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
 					Destination: flow.Endpoint{Namespace: "production", PodName: "backend-bbb", Labels: map[string]string{"app": "backend"}},
-					Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-					Bytes:     2000,
+					Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+					Bytes:       2000,
 				},
 				{
-					Time:      baseTime.Add(2 * time.Minute),
-					Direction: flow.Egress,
-					Source:    flow.Endpoint{Namespace: "staging", PodName: "test-runner-ccc", Labels: map[string]string{"app": "test-runner"}},
+					Time:        baseTime.Add(2 * time.Minute),
+					Direction:   flow.Egress,
+					Source:      flow.Endpoint{Namespace: "staging", PodName: "test-runner-ccc", Labels: map[string]string{"app": "test-runner"}},
 					Destination: flow.Endpoint{Namespace: "production", PodName: "backend-bbb", Labels: map[string]string{"app": "backend"}},
-					Layer4:    flow.Layer4{DestPort: 443, Protocol: flow.TCP},
-					Bytes:     500,
+					Layer4:      flow.Layer4{DestPort: 443, Protocol: flow.TCP},
+					Bytes:       500,
 				},
 			},
 			workloads: Workloads{},
@@ -118,12 +118,12 @@ func TestComputePatterns(t *testing.T) {
 			name: "single flow produces one pattern",
 			flows: []flow.Flow{
 				{
-					Time:      baseTime,
-					Direction: flow.Egress,
-					Source:    flow.Endpoint{Namespace: "default", PodName: "worker-111", Labels: map[string]string{"app": "worker"}},
+					Time:        baseTime,
+					Direction:   flow.Egress,
+					Source:      flow.Endpoint{Namespace: "default", PodName: "worker-111", Labels: map[string]string{"app": "worker"}},
 					Destination: flow.Endpoint{Namespace: "default", PodName: "db-222", Labels: map[string]string{"app": "postgres"}},
-					Layer4:    flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
-					Bytes:     100,
+					Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+					Bytes:       100,
 				},
 			},
 			workloads: Workloads{},
@@ -138,11 +138,11 @@ func TestComputePatterns(t *testing.T) {
 			name: "zero bytes flow",
 			flows: []flow.Flow{
 				{
-					Time:      baseTime,
-					Direction: flow.Internal,
-					Source:    flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
+					Time:        baseTime,
+					Direction:   flow.Internal,
+					Source:      flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
 					Destination: flow.Endpoint{Namespace: "default", PodName: "b-2", Labels: map[string]string{"app": "beta"}},
-					Layer4:    flow.Layer4{DestPort: 9090, Protocol: flow.UDP},
+					Layer4:      flow.Layer4{DestPort: 9090, Protocol: flow.UDP},
 				},
 			},
 			workloads: Workloads{},
@@ -157,25 +157,25 @@ func TestComputePatterns(t *testing.T) {
 			name: "same pattern different timestamps — first/last seen",
 			flows: []flow.Flow{
 				{
-					Time:      baseTime.Add(5 * time.Minute),
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "default", PodName: "svc-a-1", Labels: map[string]string{"app": "sava"}},
+					Time:        baseTime.Add(5 * time.Minute),
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "default", PodName: "svc-a-1", Labels: map[string]string{"app": "sava"}},
 					Destination: flow.Endpoint{Namespace: "default", PodName: "svc-b-1", Labels: map[string]string{"app": "svbb"}},
-					Layer4:    flow.Layer4{DestPort: 80, Protocol: flow.TCP},
+					Layer4:      flow.Layer4{DestPort: 80, Protocol: flow.TCP},
 				},
 				{
-					Time:      baseTime,
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "default", PodName: "svc-a-1", Labels: map[string]string{"app": "sava"}},
+					Time:        baseTime,
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "default", PodName: "svc-a-1", Labels: map[string]string{"app": "sava"}},
 					Destination: flow.Endpoint{Namespace: "default", PodName: "svc-b-1", Labels: map[string]string{"app": "svbb"}},
-					Layer4:    flow.Layer4{DestPort: 80, Protocol: flow.TCP},
+					Layer4:      flow.Layer4{DestPort: 80, Protocol: flow.TCP},
 				},
 				{
-					Time:      baseTime.Add(10 * time.Minute),
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "default", PodName: "svc-a-1", Labels: map[string]string{"app": "sava"}},
+					Time:        baseTime.Add(10 * time.Minute),
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "default", PodName: "svc-a-1", Labels: map[string]string{"app": "sava"}},
 					Destination: flow.Endpoint{Namespace: "default", PodName: "svc-b-1", Labels: map[string]string{"app": "svbb"}},
-					Layer4:    flow.Layer4{DestPort: 80, Protocol: flow.TCP},
+					Layer4:      flow.Layer4{DestPort: 80, Protocol: flow.TCP},
 				},
 			},
 			workloads: Workloads{},
@@ -190,25 +190,25 @@ func TestComputePatterns(t *testing.T) {
 			name: "deterministic key order with many patterns",
 			flows: []flow.Flow{
 				{
-					Time:      baseTime,
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "z", PodName: "z-1", Labels: map[string]string{"app": "z"}},
+					Time:        baseTime,
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "z", PodName: "z-1", Labels: map[string]string{"app": "z"}},
 					Destination: flow.Endpoint{Namespace: "a", PodName: "a-1", Labels: map[string]string{"app": "a"}},
-					Layer4:    flow.Layer4{DestPort: 1111, Protocol: flow.TCP},
+					Layer4:      flow.Layer4{DestPort: 1111, Protocol: flow.TCP},
 				},
 				{
-					Time:      baseTime,
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "a", PodName: "b-2", Labels: map[string]string{"app": "b"}},
+					Time:        baseTime,
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "a", PodName: "b-2", Labels: map[string]string{"app": "b"}},
 					Destination: flow.Endpoint{Namespace: "m", PodName: "c-3", Labels: map[string]string{"app": "c"}},
-					Layer4:    flow.Layer4{DestPort: 2222, Protocol: flow.UDP},
+					Layer4:      flow.Layer4{DestPort: 2222, Protocol: flow.UDP},
 				},
 				{
-					Time:      baseTime,
-					Direction: flow.Egress,
-					Source:    flow.Endpoint{Namespace: "m", PodName: "d-4", Labels: map[string]string{"app": "d"}},
+					Time:        baseTime,
+					Direction:   flow.Egress,
+					Source:      flow.Endpoint{Namespace: "m", PodName: "d-4", Labels: map[string]string{"app": "d"}},
 					Destination: flow.Endpoint{Namespace: "a", PodName: "e-5", Labels: map[string]string{"app": "e"}},
-					Layer4:    flow.Layer4{DestPort: 3333, Protocol: flow.TCP},
+					Layer4:      flow.Layer4{DestPort: 3333, Protocol: flow.TCP},
 				},
 			},
 			workloads: Workloads{},
@@ -264,25 +264,25 @@ func TestComputePatterns_FirstLastSeen(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime.Add(30 * time.Minute),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
+			Time:        baseTime.Add(30 * time.Minute),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "b-2", Labels: map[string]string{"app": "beta"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "b-2", Labels: map[string]string{"app": "beta"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 		{
-			Time:      baseTime.Add(1 * time.Hour),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
+			Time:        baseTime.Add(1 * time.Hour),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "a-1", Labels: map[string]string{"app": "alpha"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "b-2", Labels: map[string]string{"app": "beta"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 	}
 
@@ -299,11 +299,11 @@ func TestComputePatterns_ProtoFallback(t *testing.T) {
 	// Flow with empty protocol — should default to "UNKNOWN"
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "ns", PodName: "app-1", Labels: map[string]string{"app": "app"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "ns", PodName: "app-1", Labels: map[string]string{"app": "app"}},
 			Destination: flow.Endpoint{Namespace: "ns", PodName: "svc-2", Labels: map[string]string{"app": "svc"}},
-			Layer4:    flow.Layer4{DestPort: 9999}, // no protocol field set
+			Layer4:      flow.Layer4{DestPort: 9999}, // no protocol field set
 		},
 	}
 
@@ -321,10 +321,10 @@ func TestComputePatterns_WorkloadResolution(t *testing.T) {
 		{
 			Time:      baseTime,
 			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "frontend-abcdef12345"},
+			Source:    flow.Endpoint{Namespace: "default", PodName: "frontend-7d3f9abc"},
 			Destination: flow.Endpoint{
 				Namespace: "production",
-				PodName:   "backend-99887766554",
+				PodName:   "backend-7d3f9abc",
 				Labels:    map[string]string{"app": "backend"},
 			},
 			Layer4: flow.Layer4{DestPort: 443, Protocol: flow.TCP},
@@ -344,18 +344,18 @@ func TestComputePatterns_DifferentFlowsSameKey(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
 			Destination: flow.Endpoint{Namespace: "production", PodName: "backend-bbb", Labels: map[string]string{"app": "backend"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 		{
-			Time:      baseTime.Add(1 * time.Minute),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "production", PodName: "frontend-ccc", Labels: map[string]string{"app": "frontend"}},
+			Time:        baseTime.Add(1 * time.Minute),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "production", PodName: "frontend-ccc", Labels: map[string]string{"app": "frontend"}},
 			Destination: flow.Endpoint{Namespace: "production", PodName: "backend-ddd", Labels: map[string]string{"app": "backend"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 	}
 
@@ -371,25 +371,25 @@ func TestComputePatterns_PortAndProtocolDistinct(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Egress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "myapp"}},
+			Time:        baseTime,
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "myapp"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "myservice"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 		{
-			Time:      baseTime.Add(1 * time.Minute),
-			Direction: flow.Egress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "myapp"}},
+			Time:        baseTime.Add(1 * time.Minute),
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "myapp"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "myservice"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.UDP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.UDP},
 		},
 		{
-			Time:      baseTime.Add(2 * time.Minute),
-			Direction: flow.Egress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "myapp"}},
+			Time:        baseTime.Add(2 * time.Minute),
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "myapp"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "myservice"}},
-			Layer4:    flow.Layer4{DestPort: 9090, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 9090, Protocol: flow.TCP},
 		},
 	}
 
@@ -505,28 +505,28 @@ func TestComputePatterns_ByteAggregation(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "svc"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-			Bytes:     100,
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Bytes:       100,
 		},
 		{
-			Time:      baseTime.Add(1 * time.Minute),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
+			Time:        baseTime.Add(1 * time.Minute),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "svc"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-			Bytes:     200,
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Bytes:       200,
 		},
 		{
-			Time:      baseTime.Add(2 * time.Minute),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
+			Time:        baseTime.Add(2 * time.Minute),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "svc"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-			Bytes:     300,
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Bytes:       300,
 		},
 	}
 
@@ -542,11 +542,11 @@ func TestComputePatterns_NilWorkloads(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "svc"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 	}
 
@@ -561,11 +561,11 @@ func TestComputePatterns_WorkloadsPassedButUnused(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "app-1", Labels: map[string]string{"app": "app"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "svc-1", Labels: map[string]string{"app": "svc"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
 		},
 	}
 
@@ -618,11 +618,11 @@ func TestComputePatterns_MultipleProtocols(t *testing.T) {
 			t.Parallel()
 			flows := []flow.Flow{
 				{
-					Time:      baseTime,
-					Direction: flow.Ingress,
-					Source:    flow.Endpoint{Namespace: "a", PodName: "x-1", Labels: map[string]string{"app": "x"}},
+					Time:        baseTime,
+					Direction:   flow.Ingress,
+					Source:      flow.Endpoint{Namespace: "a", PodName: "x-1", Labels: map[string]string{"app": "x"}},
 					Destination: flow.Endpoint{Namespace: "a", PodName: "y-1", Labels: map[string]string{"app": "y"}},
-					Layer4:    flow.Layer4{DestPort: 80, Protocol: tt.proto},
+					Layer4:      flow.Layer4{DestPort: 80, Protocol: tt.proto},
 				},
 			}
 			got := ComputePatterns(flows, Workloads{})
@@ -639,12 +639,12 @@ func TestComputePatterns_LargeCount(t *testing.T) {
 	flows := make([]flow.Flow, 1000)
 	for i := range flows {
 		flows[i] = flow.Flow{
-			Time:      baseTime.Add(time.Duration(i) * time.Second),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "default", PodName: "frontend-1", Labels: map[string]string{"app": "frontend"}},
+			Time:        baseTime.Add(time.Duration(i) * time.Second),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "default", PodName: "frontend-1", Labels: map[string]string{"app": "frontend"}},
 			Destination: flow.Endpoint{Namespace: "default", PodName: "backend-1", Labels: map[string]string{"app": "backend"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-			Bytes:     4096,
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Bytes:       4096,
 		}
 	}
 
@@ -676,28 +676,28 @@ func TestComputePatterns_DeterministicOutput(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime.Add(5 * time.Minute),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
+			Time:        baseTime.Add(5 * time.Minute),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "production", PodName: "frontend-aaa", Labels: map[string]string{"app": "frontend"}},
 			Destination: flow.Endpoint{Namespace: "production", PodName: "backend-bbb", Labels: map[string]string{"app": "backend"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-			Bytes:     1000,
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Bytes:       1000,
 		},
 		{
-			Time:      baseTime,
-			Direction: flow.Egress,
-			Source:    flow.Endpoint{Namespace: "staging", PodName: "test-ccc", Labels: map[string]string{"app": "test"}},
+			Time:        baseTime,
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "staging", PodName: "test-ccc", Labels: map[string]string{"app": "test"}},
 			Destination: flow.Endpoint{Namespace: "production", PodName: "backend-bbb", Labels: map[string]string{"app": "backend"}},
-			Layer4:    flow.Layer4{DestPort: 443, Protocol: flow.TCP},
-			Bytes:     2000,
+			Layer4:      flow.Layer4{DestPort: 443, Protocol: flow.TCP},
+			Bytes:       2000,
 		},
 		{
-			Time:      baseTime.Add(10 * time.Minute),
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "production", PodName: "frontend-ddd", Labels: map[string]string{"app": "frontend"}},
+			Time:        baseTime.Add(10 * time.Minute),
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "production", PodName: "frontend-ddd", Labels: map[string]string{"app": "frontend"}},
 			Destination: flow.Endpoint{Namespace: "production", PodName: "backend-eee", Labels: map[string]string{"app": "backend"}},
-			Layer4:    flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
-			Bytes:     3000,
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Bytes:       3000,
 		},
 	}
 
@@ -732,18 +732,18 @@ func TestPattern_DeterministicKeyOrder(t *testing.T) {
 
 	flows := []flow.Flow{
 		{
-			Time:      baseTime,
-			Direction: flow.Ingress,
-			Source:    flow.Endpoint{Namespace: "ns1", PodName: "pod-a-1", Labels: map[string]string{"app": "alpha"}},
+			Time:        baseTime,
+			Direction:   flow.Ingress,
+			Source:      flow.Endpoint{Namespace: "ns1", PodName: "pod-a-1", Labels: map[string]string{"app": "alpha"}},
 			Destination: flow.Endpoint{Namespace: "ns2", PodName: "pod-b-1", Labels: map[string]string{"app": "beta"}},
-			Layer4:    flow.Layer4{DestPort: 443, Protocol: flow.TCP},
+			Layer4:      flow.Layer4{DestPort: 443, Protocol: flow.TCP},
 		},
 		{
-			Time:      baseTime.Add(1 * time.Second),
-			Direction: flow.Egress,
-			Source:    flow.Endpoint{Namespace: "ns2", PodName: "pod-c-1", Labels: map[string]string{"app": "charlie"}},
+			Time:        baseTime.Add(1 * time.Second),
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "ns2", PodName: "pod-c-1", Labels: map[string]string{"app": "charlie"}},
 			Destination: flow.Endpoint{Namespace: "ns1", PodName: "pod-d-1", Labels: map[string]string{"app": "delta"}},
-			Layer4:    flow.Layer4{DestPort: 80, Protocol: flow.UDP},
+			Layer4:      flow.Layer4{DestPort: 80, Protocol: flow.UDP},
 		},
 	}
 

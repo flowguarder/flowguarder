@@ -50,7 +50,7 @@ func TestMatchFlow_EgressNoMatch(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToWorkloads: []string{"default/backend"},
@@ -71,7 +71,7 @@ func TestMatchFlow_IngressPortMatch(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/backend",
+			WorkloadID: "default/backend",
 			IngressRules: []policy.IngressRule{
 				{
 					FromWorkloads: []string{"default/frontend"},
@@ -91,7 +91,7 @@ func TestMatchFlow_InternalFlow(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/backend",
+			WorkloadID: "default/backend",
 			IngressRules: []policy.IngressRule{
 				{
 					FromWorkloads: []string{"default/frontend"},
@@ -112,7 +112,7 @@ func TestMatchFlow_WorldEgressPortOnlyRule(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend", // matches flow's source
+			WorkloadID: "default/frontend", // matches flow's source
 			EgressRules: []policy.EgressRule{
 				{
 					ToPorts: []policy.PortSpec{{Port: 443, Protocol: "TCP"}},
@@ -133,7 +133,7 @@ func TestMatchFlow_CIDRMatchWorld(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToCIDRs: []string{"0.0.0.0/0"},
@@ -171,7 +171,7 @@ func TestMatchFlow_CIDRMatchApiserver(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToCIDRs: []string{"apiserver"},
@@ -192,7 +192,7 @@ func TestMatchFlow_WrongWorkload(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/backend",
+			WorkloadID: "default/backend",
 			IngressRules: []policy.IngressRule{
 				{
 					FromWorkloads: []string{"default/frontend"},
@@ -216,7 +216,7 @@ func TestComputeCoverage_AllCovered(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToWorkloads: []string{"default/backend"},
@@ -263,7 +263,7 @@ func TestComputeCoverage_PartialCoverage(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToWorkloads: []string{"default/backend"},
@@ -297,7 +297,7 @@ func TestUncoveredFlows_AllCovered(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToWorkloads: []string{"default/backend"},
@@ -332,7 +332,7 @@ func TestUncoveredFlows_PartialCoverage(t *testing.T) {
 
 	policies := []policy.Policy{
 		{
-			WorkloadID:   "default/frontend",
+			WorkloadID: "default/frontend",
 			EgressRules: []policy.EgressRule{
 				{
 					ToPorts: []policy.PortSpec{{Port: 80, Protocol: "TCP"}},
@@ -370,8 +370,8 @@ func makeTestFlow(dir flow.Direction, srcIP, dstIP string, port uint16, proto st
 			Labels:    map[string]string{"app": "backend"},
 			IP:        dstIP,
 		},
-		Layer4:    flow.Layer4{DestPort: port, Protocol: flow.Protocol(proto)},
-		Verdict:   verdict,
+		Layer4:  flow.Layer4{DestPort: port, Protocol: flow.Protocol(proto)},
+		Verdict: verdict,
 	}
 }
 

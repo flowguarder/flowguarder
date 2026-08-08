@@ -90,12 +90,12 @@ func isDNSInConfig(port int, proto flow.Protocol, kdp []config.PortSpec) bool {
 //
 // Classification priority order:
 //
-//	1. kube-apiserver — Destination IP is in APIServerCIDRs or the port is 443/6443
-//	2. dns — Destination port is a DNS port (default 53) and matches KubeDNSPorts
-//	3. ingress-world — Source is public, Destination is private
-//	4. egress-world — Destination is public, Source is private
-//	5. pod-pod — both endpoints are private
-//	6. unknown — default fallback
+//  1. kube-apiserver — Destination IP is in APIServerCIDRs or the port is 443/6443
+//  2. dns — Destination port is a DNS port (default 53) and matches KubeDNSPorts
+//  3. ingress-world — Source is public, Destination is private
+//  4. egress-world — Destination is public, Source is private
+//  5. pod-pod — both endpoints are private
+//  6. unknown — default fallback
 func ClassifyPeer(f flow.Flow, cfg config.Config) flow.PeerType {
 	dstIP := net.ParseIP(f.Destination.IP)
 	srcIP := net.ParseIP(f.Source.IP)
@@ -110,7 +110,10 @@ func ClassifyPeer(f flow.Flow, cfg config.Config) flow.PeerType {
 	}
 
 	// --- kube-apiserver (label-based fallback) ---
-	if f.Destination.Labels["reserved:kube-apiserver"] != "" {
+	if _, ok := f.Destination.Labels["reserved:kube-apiserver"]; ok {
+		return flow.KubeAPIServer
+	}
+	if _, ok := f.Source.Labels["reserved:kube-apiserver"]; ok {
 		return flow.KubeAPIServer
 	}
 

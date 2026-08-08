@@ -26,6 +26,7 @@ tenant1-calico-flows.jsonl
 
 # .omo internal orchestration state
 .omo/
+omo/
 
 # macOS
 .DS_Store

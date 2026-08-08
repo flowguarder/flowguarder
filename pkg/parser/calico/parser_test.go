@@ -34,21 +34,21 @@ func TestSource(t *testing.T) {
 
 func TestTableDriven(t *testing.T) {
 	type args struct {
-		testFile     string
+		testFile      string
 		expectedCount int
 	}
 	type want struct {
-		verdict    flow.Verdict
-		proto      flow.Protocol
-		srcIP      string
-		dstIP      string
-		dstPort    uint16
-		srcNS      string
-		srcName    string
-		dstNS      string
-		dstName    string
-		direction  flow.Direction
-		expectErr  bool
+		verdict   flow.Verdict
+		proto     flow.Protocol
+		srcIP     string
+		dstIP     string
+		dstPort   uint16
+		srcNS     string
+		srcName   string
+		dstNS     string
+		dstName   string
+		direction flow.Direction
+		expectErr bool
 	}
 	tests := []struct {
 		name string
@@ -58,7 +58,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "allow flow — frontend to backend",
 			args: args{
-				testFile:     "testdata/calico/normal.json",
+				testFile:      "testdata/calico/normal.json",
 				expectedCount: 5,
 			},
 			want: want{
@@ -77,7 +77,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "deny flow — staging to production SSH blocked",
 			args: args{
-				testFile:     "testdata/calico/drops.json",
+				testFile:      "testdata/calico/drops.json",
 				expectedCount: 3,
 			},
 			want: want{
@@ -96,7 +96,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "UDP DNS flow",
 			args: args{
-				testFile:     "testdata/calico/normal.json",
+				testFile:      "testdata/calico/normal.json",
 				expectedCount: 5,
 			},
 			want: want{
@@ -115,7 +115,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "egress to external IP",
 			args: args{
-				testFile:     "testdata/calico/public_egress.json",
+				testFile:      "testdata/calico/public_egress.json",
 				expectedCount: 3,
 			},
 			want: want{
@@ -134,7 +134,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "full normal — 5 flows",
 			args: args{
-				testFile:     "testdata/calico/normal.json",
+				testFile:      "testdata/calico/normal.json",
 				expectedCount: 5,
 			},
 			want: want{
@@ -145,7 +145,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "full drops — 3 flows",
 			args: args{
-				testFile:     "testdata/calico/drops.json",
+				testFile:      "testdata/calico/drops.json",
 				expectedCount: 3,
 			},
 			want: want{
@@ -157,7 +157,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "port scan — 7 deny flows",
 			args: args{
-				testFile:     "testdata/calico/port_scan.json",
+				testFile:      "testdata/calico/port_scan.json",
 				expectedCount: 7,
 			},
 			want: want{
@@ -171,7 +171,7 @@ func TestTableDriven(t *testing.T) {
 		{
 			name: "missing source_name still parses",
 			args: args{
-				testFile:     "testdata/calico/public_egress.json",
+				testFile:      "testdata/calico/public_egress.json",
 				expectedCount: 3,
 			},
 			want: want{
@@ -304,8 +304,8 @@ func TestProtoMapping(t *testing.T) {
 		{"icmp", flow.ICMP},
 		{"ICMP", flow.ICMP},
 		{"sctp", flow.SCTP},
-		{"unknown", flow.ANY_P},
-		{"", flow.ANY_P},
+		{"unknown", flow.Any},
+		{"", flow.Any},
 	}
 
 	for _, tt := range tests {

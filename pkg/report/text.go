@@ -44,48 +44,82 @@ func RenderText(r TextReport, w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
 	// --- Summary ---
-	fmt.Fprintf(tw, "=== flowGuarder Analysis Report ===\n\n")
-	fmt.Fprintf(tw, "Summary\n")
-	fmt.Fprintf(tw, "  Total patterns:      %d\n", r.Summary.TotalPatterns)
-	fmt.Fprintf(tw, "  Total anomalies:     %d\n", r.Summary.TotalAnomalies)
-	if len(r.Summary.AnomaliesBySeverity) > 0 {
-		fmt.Fprintf(tw, "  Anomalies by severity:\n")
+	if _, err := fmt.Fprintf(tw, "=== flowGuarder Analysis Report ===\n\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tw, "Summary\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tw, "  Total patterns:      %d\n", r.TotalPatterns); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tw, "  Total anomalies:     %d\n", r.TotalAnomalies); err != nil {
+		return err
+	}
+	if len(r.AnomaliesBySeverity) > 0 {
+		if _, err := fmt.Fprintf(tw, "  Anomalies by severity:\n"); err != nil {
+			return err
+		}
 		for _, sev := range []string{"high", "medium", "low", "info"} {
-			c, ok := r.Summary.AnomaliesBySeverity[sev]
+			c, ok := r.AnomaliesBySeverity[sev]
 			if !ok {
 				continue
 			}
-			fmt.Fprintf(tw, "    %-10s %d\n", sev+":", c)
+			if _, err := fmt.Fprintf(tw, "    %-10s %d\n", sev+":", c); err != nil {
+				return err
+			}
 		}
-		fmt.Fprintf(tw, "\n")
+		if _, err := fmt.Fprintf(tw, "\n"); err != nil {
+			return err
+		}
 	}
 
 	// --- Patterns table ---
-	fmt.Fprintf(tw, "Patterns\n")
-	fmt.Fprintf(tw, "%s\n", strings.Repeat("-", 80))
-	fmt.Fprintf(tw, "%-10s %-10s %-20s %6s  %-6s %12s\n",
-		"Source", "Dest", "Key", "Port", "Proto", "Count")
+	if _, err := fmt.Fprintf(tw, "Patterns\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tw, "%s\n", strings.Repeat("-", 80)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tw, "%-10s %-10s %-20s %6s  %-6s %12s\n",
+		"Source", "Dest", "Key", "Port", "Proto", "Count"); err != nil {
+		return err
+	}
 	for _, p := range r.Patterns {
-		fmt.Fprintf(tw, "%-10s %-10s %-20s %6d  %-6s %12d\n",
+		if _, err := fmt.Fprintf(tw, "%-10s %-10s %-20s %6d  %-6s %12d\n",
 			p.Source,
 			p.Dest,
 			p.Key,
 			p.Port,
 			p.Protocol,
 			p.Count,
-		)
+		); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintf(tw, "\n")
+	if _, err := fmt.Fprintf(tw, "\n"); err != nil {
+		return err
+	}
 
 	// --- Anomalies list ---
-	fmt.Fprintf(tw, "Anomalies\n")
-	fmt.Fprintf(tw, "%s\n", strings.Repeat("-", 80))
-	for _, a := range r.Anomalies {
-		fmt.Fprintf(tw, "  [%-6s] %-15s %-20s %s\n",
-			a.Severity, a.Type, a.Workload, a.Description)
+	if _, err := fmt.Fprintf(tw, "Anomalies\n"); err != nil {
+		return err
 	}
-	fmt.Fprintf(tw, "\n")
-	fmt.Fprintf(tw, "====================================\n")
+	if _, err := fmt.Fprintf(tw, "%s\n", strings.Repeat("-", 80)); err != nil {
+		return err
+	}
+	for _, a := range r.Anomalies {
+		if _, err := fmt.Fprintf(tw, "  [%-6s] %-15s %-20s %s\n",
+			a.Severity, a.Type, a.Workload, a.Description); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(tw, "\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tw, "====================================\n"); err != nil {
+		return err
+	}
 
 	return tw.Flush()
 }

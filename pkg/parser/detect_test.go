@@ -87,7 +87,7 @@ func TestDetectFormat(t *testing.T) {
 			want:  SourceGoldmane,
 		},
 		{
-			name:  "mixed Hubble first line then Goldmane — Hubble wins",
+			name: "mixed Hubble first line then Goldmane — Hubble wins",
 			input: `{"time":"2024-01-01T00:00:00Z","verdict":"FORWARDED","source":{"pod_name":"foo"},"destination":{"pod_name":"bar"}}
 {"flow":{"source":{"ip":"10.0.0.1"},"destination":{"ip":"10.0.0.2"}},"sourceName":"hubble-proxy"}`,
 			want: SourceHubble,
@@ -212,17 +212,17 @@ func TestDetectFormatDir(t *testing.T) {
 type _testHubbleParser struct{}
 
 func (p *_testHubbleParser) Parse(r io.Reader, emit func(flow.Flow) error) error { return nil }
-func (p *_testHubbleParser) Source() Source { return SourceHubble }
+func (p *_testHubbleParser) Source() Source                                      { return SourceHubble }
 
 type _testCalicoParser struct{}
 
 func (p *_testCalicoParser) Parse(r io.Reader, emit func(flow.Flow) error) error { return nil }
-func (p *_testCalicoParser) Source() Source { return SourceCalico }
+func (p *_testCalicoParser) Source() Source                                      { return SourceCalico }
 
 type _testCalicoSyslogParser struct{}
 
 func (p *_testCalicoSyslogParser) Parse(r io.Reader, emit func(flow.Flow) error) error { return nil }
-func (p *_testCalicoSyslogParser) Source() Source { return SourceCalicoSyslog }
+func (p *_testCalicoSyslogParser) Source() Source                                      { return SourceCalicoSyslog }
 
 // ─── SelectParser tests ────────────────────────────────────────────────
 

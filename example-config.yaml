@@ -31,6 +31,13 @@ kube_dns_ports:
   - protocol: "TCP"
     port: 53
 
+# --- Always Allow DNS ---
+# Synthesize an egress rule (UDP+TCP 53 → kube-dns) for every workload
+# that has at least one egress rule. When false, DNS is treated like any
+# other traffic and subject to classification.
+# Default: true
+# always_allow_dns: true
+
 # --- Rare Flow Threshold ---
 # Percentile (0..1) below which a flow pattern is flagged as rare.
 # Default: 0.01 (1%) — flows occurring in less than 1% of patterns are suspicious.
@@ -122,6 +129,20 @@ public_egress_allowlist_cidrs: []
 #   - protocol: "TCP"
 #     port: 6443
 
+# --- API Server Workload Selector ---
+# Explicitly identify the workload treated as kube-apiserver for the
+# apiserver-port override. Defaults to kube-system/kube-apiserver when present;
+# when absent only reserved:kube-apiserver peers trigger the override.
+# apiserver_workload_selector:
+#   namespace: "kube-system"
+#   name: "kube-apiserver"
+
+# --- Node CIDRs ---
+# Optional IP ranges covering cluster nodes. When set, NetworkPolicy renders
+# these alongside inferred /32 node IPs for apiserver rules.
+# node_cidrs:
+#   - "192.168.107.0/24"
+
 # --- Public Services ---
 # Kubernetes services whose ingress is rendered as a single match-all rule
 # (from: 0.0.0.0/0 equivalent) instead of one rule per client. This avoids the
@@ -138,6 +159,7 @@ public_egress_allowlist_cidrs: []
 #         port: 53
 #       - protocol: "TCP"
 #         port: 53
+#     egress_allow_world: true  # opt-in: render reserved host/remote-node egress as 0.0.0.0/0 for this service
 #   - namespace: "kube-system"
 #     name: "metrics-server"
 #     ports:
@@ -145,3 +167,8 @@ public_egress_allowlist_cidrs: []
 #         port: 4443
 #       - protocol: "TCP"
 #         port: 10250
+#     egress_ports:                      # synthesizes an egress rule (dual-carry 0.0.0.0/0 + entity:world)
+#       - protocol: "TCP"                # for infrastructure connections outbound from this service
+#         port: 80
+#       - protocol: "UDP"
+#         port: 53

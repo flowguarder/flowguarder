@@ -41,7 +41,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "dial %s: %v\n", *addr, err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := observer.NewObserverClient(conn)
 
@@ -56,9 +56,13 @@ func main() {
 	log := slog.Default().With("cmd", "dump-hubble", "addr", *addr, "duration", dur.String())
 	log.Info("capturing flows")
 
+	// EmitUnpopulated must stay false: protojson then omits zero-valued enum
+	// fields such as traffic_direction, which the Hubble parser would reject
+	// (fail-fast) if it saw "TRAFFIC_DIRECTION_UNKNOWN". This matches the
+	// marshal options used by pkg/ingest HubbleGRPCClient.
 	opts := protojson.MarshalOptions{
 		UseProtoNames:   true,
-		EmitUnpopulated: true,
+		EmitUnpopulated: false,
 	}
 	var count int
 	for {
