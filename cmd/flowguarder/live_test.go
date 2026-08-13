@@ -233,7 +233,7 @@ func TestLiveCoverageReport(t *testing.T) {
 			},
 		}
 
-		err := runLiveAfterParse(cmd, flows, parser.SourceAuto)
+		err := runLiveAfterParse(cmd, flows, parser.SourceAuto, "")
 		require.NoError(t, err)
 
 		got := buf.String()
@@ -312,7 +312,7 @@ func TestRunLiveAfterParseFormatSelection(t *testing.T) {
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
 
-			err := runLiveAfterParse(cmd, flows, tc.sourceType)
+			err := runLiveAfterParse(cmd, flows, tc.sourceType, "")
 			require.NoError(t, err)
 
 			entries, err := os.ReadDir(rootFlags.outputDir)

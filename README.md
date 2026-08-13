@@ -18,6 +18,7 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 - **Anomaly detection** (7 detectors) — port-scan, rare-flow, asymmetric traffic, dropped flows, public egress, cross-namespace, TLS / unknown domain.
 - **NetworkPolicy + CiliumNetworkPolicy generation** — deterministic policy manifests with optional default-deny stubs, symmetric ingress/egress rules (egress flows mirrored as destination ingress rules), and kube-apiserver sentinel rules (matching TCP/6443 and related ports to the apiserver CIDR).
 - **Insight reports** — `--report` flags for top-flows, coverage, uncovered, egress-world, drops, and anomalies. Controlled via `--top-n` and `--generate-uncovered`.
+- **Policy visualization** — generates a self-contained interactive HTML graph (`flowguarder-visualization.html`) alongside the policy manifests, rendering namespaces, workloads, reserved peers and CIDRs as nodes with labeled protocol/port edges. Includes search, filtering, namespace collapse/expand, node details, and PNG/JPG export — fully offline (Cytoscape.js + dagre inlined, no CDN).
 - **Config-driven thresholds** — YAML config file for per-cluster customisation of CIDRs, excluded namespaces, detector thresholds, allowlists, and namespace profiles.
 - **Deterministic output** — all keys and slices are sorted; repeated runs on identical input produce identical manifests.
 
@@ -33,6 +34,28 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 6. **Build policies** — The abstract policy model is rendered into Kubernetes-Native `NetworkPolicy` or `CiliumNetworkPolicy` manifests.
 7. **Write manifests** — YAML files are written to the output directory, one per workload.
 8. **Print reports** — Selected report sections are printed to stdout (top-flows, coverage, drops, etc.).
+
+---
+
+## Visualization
+
+When `--output` is set (and `--skip-visualize` is not used, which is the default), flowGuarder also generates a self-contained HTML visualization file named `flowguarder-visualization.html` alongside the policy YAMLs. This file renders the analyzed traffic as an interactive graph:
+
+- **Nodes** — namespaces appear as grouped containers; workloads are displayed inside their namespace; reserved peers (`world`, `cluster`, `host`, `remote-node`, `kube-apiserver`) and raw CIDRs are shown as distinct ungrouped nodes.
+- **Edges** — every traffic flow is an edge connecting source to destination, labeled with `protocol/port`. Direction (ingress/egress) is encoded by the edge colour and arrow.
+- **Interactions** — zoom and pan the graph, type to search workloads by name, and filter by namespace, protocol, port, or direction. Click any node to open a side panel with workload details and the rules that apply to it. Namespaces can be collapsed or expanded to reduce visual clutter.
+- **Export** — PNG and JPG screenshots can be exported directly from the browser.
+- **Offline** — the file is fully self-contained: Cytoscape.js and the dagre layout engine are inlined (no external CDN) — it works without any network connection.
+
+```console
+$ flowguarder analyze flows.jsonl --output ./out
+# then open out/flowguarder-visualization.html in any browser
+
+$ flowguarder live --hubble-server 127.0.0.1:4245 --output ./out
+# same output directory, visualization is generated when --output is set
+```
+
+![Visualization screenshot](docs/visualization-screenshot.png)
 
 ---
 
@@ -114,6 +137,7 @@ $ flowguarder analyze flows.jsonl --output ./policies --report top-flows --repor
 | `-r, --report` | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none) |
 | `--top-n` | Number of top entries in reports | `10` |
 | `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`) | `false` |
+| `--skip-visualize` | Skip generating flowguarder-visualization.html | `false` |
 
 ### `flowguarder live`
 
@@ -139,12 +163,13 @@ Inherited from the root command:
 | `--format` | Report output format | `text` |
 | `--strict` | Disable safety margins | `false` |
 | `--default-deny` | Add deny-all stub policies | `false` |
-| `--policy-format` | Policy output format (`auto`, `np`, `cnp` | default `auto`) | `auto` |
+| `--policy-format` | Policy output format (`auto`, `np`, `cnp`; default `auto`) | `auto` |
 | `--cilium` | _(hidden, legacy alias for `--policy-format=cnp`)_ | `false` |
 | `--kubeconfig` | Path to kubeconfig for dry-run diff (hidden) | (none) |
 | `-r, --report` | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none) |
 | `--top-n` | Number of top entries in reports | `10` |
 | `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`) | `false` |
+| `--skip-visualize` | Skip generating flowguarder-visualization.html | `false` |
 
 Ctrl-C or SIGTERM gracefully stops the stream.
 

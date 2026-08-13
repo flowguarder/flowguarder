@@ -97,14 +97,14 @@ func runLiveCommand(cmd *cobra.Command) error {
 	defer cancel()
 
 	if hubbleServer != "" {
-		return runLiveHubble(ctx, cmd, hubbleServer, parser.SourceHubble)
+		return runLiveHubble(ctx, cmd, hubbleServer, parser.SourceHubble, hubbleServer)
 	}
 
-	return runLiveCalico(ctx, cmd, calicoFile, parser.SourceCalico)
+	return runLiveCalico(ctx, cmd, calicoFile, parser.SourceCalico, calicoFile)
 }
 
 // runLiveHubble connects to Hubble Relay via gRPC and runs the analysis pipeline.
-func runLiveHubble(ctx context.Context, cmd *cobra.Command, address string, srcType parser.Source) error {
+func runLiveHubble(ctx context.Context, cmd *cobra.Command, address string, srcType parser.Source, source string) error {
 	src := &ingest.HubbleGRPCClient{
 		Address: address,
 		TLS:     false,
@@ -116,11 +116,11 @@ func runLiveHubble(ctx context.Context, cmd *cobra.Command, address string, srcT
 	}
 	defer func() { _ = reader.Close() }()
 
-	return runPipelineFromReader(ctx, cmd, reader, srcType)
+	return runPipelineFromReader(ctx, cmd, reader, srcType, source)
 }
 
 // runLiveCalico tails a Calico flow log file and runs the analysis pipeline.
-func runLiveCalico(ctx context.Context, cmd *cobra.Command, filePath string, srcType parser.Source) error {
+func runLiveCalico(ctx context.Context, cmd *cobra.Command, filePath string, srcType parser.Source, source string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("opening Calico log file %s: %w", filePath, err)
@@ -168,11 +168,11 @@ func runLiveCalico(ctx context.Context, cmd *cobra.Command, filePath string, src
 	}()
 
 	// Parse and run pipeline on each line
-	return runPipelineFromLines(ctx, cmd, lines, srcType)
+	return runPipelineFromLines(ctx, cmd, lines, srcType, source)
 }
 
 // runPipelineFromReader reads flows from a reader and executes the full analysis.
-func runPipelineFromReader(ctx context.Context, cmd *cobra.Command, reader io.Reader, srcType parser.Source) error {
+func runPipelineFromReader(ctx context.Context, cmd *cobra.Command, reader io.Reader, srcType parser.Source, source string) error {
 	flows := make(chan flow.Flow, 128)
 	go func() {
 		defer close(flows)
@@ -194,11 +194,11 @@ func runPipelineFromReader(ctx context.Context, cmd *cobra.Command, reader io.Re
 		}
 	}()
 
-	return runPipelineFromFlows(ctx, cmd, flows, srcType)
+	return runPipelineFromFlows(ctx, cmd, flows, srcType, source)
 }
 
 // runPipelineFromLines tails a file line by line and runs the analysis.
-func runPipelineFromLines(ctx context.Context, cmd *cobra.Command, lines <-chan string, srcType parser.Source) error {
+func runPipelineFromLines(ctx context.Context, cmd *cobra.Command, lines <-chan string, srcType parser.Source, source string) error {
 	flows := make(chan flow.Flow, 128)
 	go func() {
 		defer close(flows)
@@ -220,11 +220,11 @@ func runPipelineFromLines(ctx context.Context, cmd *cobra.Command, lines <-chan 
 		}
 	}()
 
-	return runPipelineFromFlows(ctx, cmd, flows, srcType)
+	return runPipelineFromFlows(ctx, cmd, flows, srcType, source)
 }
 
 // runPipelineFromFlows runs the analysis pipeline on flowing flows.
-func runPipelineFromFlows(ctx context.Context, cmd *cobra.Command, flows <-chan flow.Flow, srcType parser.Source) error {
+func runPipelineFromFlows(ctx context.Context, cmd *cobra.Command, flows <-chan flow.Flow, srcType parser.Source, source string) error {
 	var parsedFlows []flow.Flow
 
 loop:
@@ -245,11 +245,11 @@ loop:
 		return nil
 	}
 
-	return runLiveAfterParse(cmd, parsedFlows, srcType)
+	return runLiveAfterParse(cmd, parsedFlows, srcType, source)
 }
 
 // runLiveAfterParse runs the analysis pipeline on already-parsed flows.
-func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow, srcType parser.Source) error {
+func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow, srcType parser.Source, source string) error {
 	cfg, err := config.Load(rootFlags.configPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -291,6 +291,11 @@ func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow, srcType parser.Sou
 			}
 		}
 		cmd.Printf("Wrote policy files to %s\n", rootFlags.outputDir)
+
+		// Generate HTML visualization
+		if err := writeVisualizationHTML(rootFlags.outputDir, pols, source, rootFlags.skipVisualize); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write visualization: %v\n", err)
+		}
 	}
 
 	// Print report

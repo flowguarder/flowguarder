@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flowGuarder - Policy Visualization</title>
+
+<!--
+  flowguarder - Policy Visualization
+  Cytoscape.js - MIT, Copyright (c) 2016-2026 The Cytoscape Consortium
+  dagre - MIT, Copyright (c) 2012-2014 Chris Pettitt
+  cytoscape-dagre - MIT
+-->
+
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0d1117;--fg:#c9d1d9;--border:#30363d;--surface:#161b22;
+  --accent:#58a6ff;--accent2:#1f6feb;--text-dim:#8b949e;
+  --ingress:#8b5cf6;--egress:#38bdf8;--danger:#f85149;
+  --workload-bg:#1f6feb;--reserved-bg:#d73a49;
+  --cidr-bg:#6e40c9;--sel-bg:#d29922
+}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);font-size:13px}
+#topbar{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:10px;font-size:14px;font-weight:600}
+#topbar .badge{font-size:11px;background:var(--accent2);color:#fff;padding:2px 8px;border-radius:10px}
+#container{display:grid;grid-template-columns:240px 1fr 280px;height:calc(100vh - 44px)}
+.panel{background:var(--surface);border-right:1px solid var(--border);padding:12px;overflow-y:auto;display:flex;flex-direction:column}
+.panel:last-child{border-right:none;border-left:1px solid var(--border)}
+.panel h3{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-dim);margin:10px 0 6px}
+#search-input{width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px}
+#search-input:focus{outline:none;border-color:var(--accent)}
+#search-clear{font-size:11px;color:var(--accent);cursor:pointer;opacity:0;transition:opacity .2s;margin-top:4px;text-align:right}
+#search-clear.show{opacity:1}
+#search-msg{font-size:12px;color:var(--text-dim);margin-top:4px;min-height:18px}
+.filter-group{margin-bottom:6px}
+.filter-group label{display:block;font-size:11px;color:var(--text-dim);margin-bottom:2px}
+.filter-group select,.filter-group input[type=text],.filter-group input[type=number]{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--fg);font-size:12px}
+.filter-group select:focus,.filter-group input:focus{outline:none;border-color:var(--accent)}
+.filter-group select option{background:var(--bg)}
+.export-row{display:flex;gap:6px;margin-top:4px}
+.export-row button{flex:1;padding:6px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--fg);cursor:pointer;font-size:11px}
+.export-row button:hover,.show-all-btn:hover{background:var(--border);border-color:var(--accent)}
+.show-all-btn{width:100%}
+#export-preview{margin-top:8px;text-align:center;display:none}
+#export-preview img{max-width:100%;max-height:100px;border-radius:4px}
+#graph-wrapper{height:100%;overflow:hidden}
+#cy{background:var(--bg);width:100%;height:100%;overflow:hidden;position:relative}
+#loading{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(22,27,34,.92);border:1px solid var(--border);border-radius:8px;padding:8px 18px;font-size:12px;color:var(--text-dim);pointer-events:none;z-index:5;display:none}
+#no-traffic{text-align:center;margin-top:40%;color:var(--text-dim);font-size:15px;pointer-events:none}
+.detail-row{margin-bottom:8px}
+.detail-label{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);margin-bottom:1px}
+.detail-value{font-size:12px;word-break:break-all;color:var(--fg)}
+.kind-tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;color:#fff;margin:2px 2px}
+.kind-namespace{background:#30363d}.kind-workload{background:var(--workload-bg)}.kind-reserved{background:var(--reserved-bg)}.kind-cidr{background:var(--cidr-bg)}.kind-selector{background:var(--sel-bg)}
+#details-msg{color:var(--text-dim);font-style:italic;padding:20px;text-align:center}
+.ns-hint{font-size:10px;color:var(--text-dim);margin-top:2px}
+/* Custom tooltip (dependency-free, replaces popover) */
+#tooltip{position:absolute;z-index:1000;background:rgba(22,27,34,.95);border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:11px;color:#c9d1d9;pointer-events:none;max-width:300px;display:none;white-space:pre-wrap}
+#ns-btn-container{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:4;overflow:hidden}
+#ns-btn-container button{position:absolute;width:20px;height:20px;cursor:pointer;border:1px solid var(--border);border-radius:50%;background:var(--surface);color:var(--fg);pointer-events:auto;display:none;align-items:center;justify-content:center;line-height:1;padding:0;box-shadow:0 1px 3px rgba(0,0,0,.5);opacity:.85;transition:opacity .15s}
+#ns-btn-container button:hover{background:var(--border);border-color:var(--accent);opacity:1}
+#ns-btn-container button svg{display:block;width:12px;height:12px}
+#zoom-controls{position:absolute;bottom:16px;right:16px;display:flex;flex-direction:column;gap:4px;z-index:100;pointer-events:auto}
+#zoom-controls button{width:32px;height:32px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);cursor:pointer;font-size:14px;font-weight:bold;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.5);transition:background .15s}
+#zoom-controls button:hover{background:var(--border);border-color:var(--accent)}
+</style>
+
+<!-- Embedded libraries (replaced by RenderHTML) -->
+<script>/* __CYTOSCAPE_JS__ */</script>
+<script>/* __DAGRE_JS__ */</script>
+<script>/* __CYTO_DAGRE_JS__ */</script>
+
+<!-- Graph data (replaced by RenderHTML) — var assignment wrappers -->
+<script>var GRAPH_DATA = /* __GRAPH_DATA__ */;</script>
+<script>var NAMESPACES = /* __NAMESPACES__ */;</script>
+<script>var PROTOCOLS = /* __PROTOCOLS__ */;</script>
+<script>var DIRECTIONS = /* __DIRECTIONS__ */;</script>
+<script>var SOURCE = /* __SOURCE__ */;</script>
+</head>
+<body>
+<div id="topbar">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="12" cy="12" r="3"/><line x1="12" y1="5" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="19"/>
+    <line x1="5" y1="12" x2="2" y2="12"/><line x1="22" y1="12" x2="19" y2="12"/>
+    <line x1="7.5" y1="7.5" x2="5.6" y2="5.6"/><line x1="18.5" y1="18.5" x2="16.6" y2="16.6"/>
+    <line x1="7.5" y1="16.5" x2="5.6" y2="18.4"/><line x1="18.5" y1="5.5" x2="16.6" y2="3.6"/>
+  </svg>
+  <span>flowGuarder</span>
+  <span class="badge">Policy Visualization</span>
+  <span class="badge" id="source-badge"></span>
+</div>
+<div id="container">
+  <div class="panel" id="search-panel">
+    <h3>Search</h3>
+    <input type="text" id="search-input" placeholder="Workload, namespace, kind...">
+    <div id="search-clear">Clear</div>
+    <div id="search-msg"></div>
+    <h3>Filters</h3>
+    <div class="filter-group">
+      <button id="btn-show-all" class="show-all-btn">Expand all</button>
+    </div>
+    <div class="filter-group">
+      <label>Namespace</label>
+      <select id="filter-ns"><option value="">All namespaces</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Protocol</label>
+      <select id="filter-proto"><option value="">All protocols</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Port</label>
+      <input type="text" id="filter-port" placeholder="e.g. 443">
+    </div>
+    <div class="filter-group">
+      <label>Direction</label>
+      <select id="filter-dir"><option value="">All directions</option></select>
+    </div>
+    <h3>Export</h3>
+    <div class="export-row">
+      <button id="export-png">PNG</button>
+      <button id="export-jpg">JPG</button>
+    </div>
+    <div id="export-preview"></div>
+  </div>
+  <div id="graph-wrapper">
+    <div id="cy"><div id="ns-btn-container"></div><div id="zoom-controls">
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-out" title="Zoom out">−</button>
+      <button id="zoom-fit" title="Fit">⌂</button>
+    </div></div>
+    <div id="loading">Running layout...</div>
+    <div id="no-traffic"><span>&#x1F578;</span>No traffic data yet.<br><span style="font-size:12px">Policies or flows will render here.</span></div>
+  </div>
+  <div class="panel" id="details-panel">
+    <h3>Details</h3>
+    <div id="details-content">
+      <div id="details-msg">Click a node or edge to see details</div>
+    </div>
+  </div>
+</div>
+<div id="tooltip"></div>
+<script>
+(function(){'use strict';
+
+/* --- DATA — lowercase "nodes"/"edges" matching JSON key casing --- */
+var DATA=(typeof GRAPH_DATA!=='undefined'&&GRAPH_DATA)?GRAPH_DATA:{nodes:[],edges:[]};
+var NS_LIST=(typeof NAMESPACES!=='undefined')?NAMESPACES:[];
+var PROTO_LIST=(typeof PROTOCOLS!=='undefined')?PROTOCOLS:[];
+var DIR_LIST=(typeof DIRECTIONS!=='undefined')?DIRECTIONS:[];
+var cy=null,selected=null,nsExpanded={},nsBtnEls={},nsSizes={};
+
+/* --- SOURCE BADGE --- */
+var sb=document.getElementById('source-badge');if(SOURCE){sb.textContent=SOURCE;if(SOURCE!=='null'&&SOURCE!==''){sb.style.display='inline-block'}else{sb.style.display='none'}}else{sb.style.display='none'}
+
+/* --- NS EXPANDED INIT --- */
+function initNsExpanded(){for(var i=0;i<DATA.nodes.length;i++){var dn=DATA.nodes[i];if(dn.data&&dn.data.kind==='namespace'&&dn.data.id){nsExpanded[dn.data.id]=true}}}
+initNsExpanded();
+
+// MERGE_PARALLEL_EDGES — dagre crashes on parallel edges in compound graphs;
+// merge by (source,target,direction), combine protocol:port pairs, sort deterministically.
+(function(){
+  var byKey={};
+  DATA.edges.forEach(function(e){
+    var d=e.data||e;var key=(d.source||'')+'|'+(d.target||'')+'|'+(d.direction||'');
+    if(!byKey[key]){byKey[key]=e;d.flows=[{protocol:d.protocol, port:d.port}]}
+    else{byKey[key].data.flows.push({protocol:d.protocol, port:d.port})}
+  });
+  DATA.edges=[];
+  for(var k in byKey){
+    var e=byKey[k],f=e.data.flows;
+    f.sort(function(a,b){if((a.protocol||'')<(b.protocol||''))return -1;if(a.protocol>b.protocol)return 1;return(a.port||0)-(b.port||0)});
+    e.data.label=f.map(function(x){return(x.protocol||'')+':'+(x.port===undefined?'':x.port)}).join(', ');
+    DATA.edges.push(e)
+  }
+})();
+
+/* --- HELPERS --- */
+function esc(s){var d=document.createElement('div');d.appendChild(document.createTextNode(s||''));return d.innerHTML}
+
+/* --- NS BUTTON ICONS (inline SVG, dependency-free) --- */
+var ICON_MINUS='<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 6h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
+var ICON_PLUS='<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 3v6M3 6h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
+function nsBtnIcon(expanded){return expanded?ICON_MINUS:ICON_PLUS}
+function nsBtnTitle(expanded){return expanded?'Collapse namespace':'Expand namespace'}
+
+/* --- Custom dependency-free tooltip --- */
+function showTooltip(el,content){
+  var t=document.getElementById('tooltip');
+  t.style.display='block';t.innerHTML=content;
+  var bbox=t.getBoundingClientRect();
+  var rp=el.renderedPosition();var cx=rp.x,cy_=rp.y;
+  var container=document.getElementById('cy').getBoundingClientRect();
+  var left=cx+container.left+window.scrollX;
+  var top_=cy_+container.top+window.scrollY-8;
+  if(left+bbox.width>window.innerWidth-10)left=window.innerWidth-bbox.width-10;
+  if(left<10)left=10;
+  if(top_-bbox.height<10)top_=cy_+container.top+window.scrollY+8;
+  t.style.left=left+'px';t.style.top=top_+'px';
+}
+function hideTooltip(){document.getElementById('tooltip').style.display='none'}
+
+/* --- EXPORT --- */
+function exportImage(fmt){
+  function dataUri(u){return u.indexOf('data:')===0?u:'data:image/png;base64,'+u}
+  function safeExportScale(){
+    var bb=cy.elements().boundingBox();
+    var w=Math.max(1,bb.w),h=Math.max(1,bb.h);
+    var s=2;
+    while((w*s>30000||h*s>30000)&&s>0.05){s/=2}
+    return s;
+  }
+  var preview=document.getElementById('export-preview');
+  preview.style.display='block';
+  if(fmt==='png'){
+    var s=safeExportScale();
+    var url=dataUri(cy.png({full:true,output:'base64uri',bg:'#0d1117',scale:s}));
+    if(url.length<100||url==='data:,'){
+      url=dataUri(cy.png({full:false,output:'base64uri',bg:'#0d1117',scale:2}))
+    }
+    preview.innerHTML='<img src="'+url+'" alt="PNG"><br><a href="'+url+'" download="flowguarder-visualization.png" style="font-size:11px;color:var(--accent)">Download PNG</a>';
+  }else{
+    var i=new Image();
+    i.onload=function(){
+      if(i.naturalWidth===0){exportImage('png');return}
+      var c=document.createElement('canvas');c.width=i.naturalWidth;c.height=i.naturalHeight;
+      var ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+      ctx.drawImage(i,0,0);
+      var jurl=c.toDataURL('image/jpeg',0.9);
+      preview.innerHTML='<img src="'+jurl+'" alt="JPG"><br><a href="'+jurl+'" download="flowguarder-visualization.jpg" style="font-size:11px;color:var(--accent)">Download JPG</a>';
+    };
+    i.onerror=function(){exportImage('png')};
+    var s=safeExportScale();
+    var jsrc=dataUri(cy.png({full:true,output:'base64uri',bg:'#ffffff',scale:s}));
+    if(jsrc.length<100||jsrc==='data:,'){
+      jsrc=dataUri(cy.png({full:false,output:'base64uri',bg:'#ffffff',scale:2}))
+    }
+    i.src=jsrc;
+  }
+}
+
+/* --- FILTERS --- */
+function applyFilters(){
+  var ni=document.getElementById('filter-ns');var nsFilter=ni?ni.value:'';
+  var pi=document.getElementById('filter-proto');var protoFilter=pi?pi.value:'';
+  var oi=document.getElementById('filter-port');var portF=oi?oi.value:'';
+  var di=document.getElementById('filter-dir');var dirFilter=di?di.value:'';
+
+  cy.nodes().forEach(function(n){
+    if(!nsFilter){n.style('display','');return}
+    if(n.data('kind')==='namespace'){
+      n.style('display',(n.id()===nsFilter)?'':'none');
+      return;
+    }
+    n.style('display',(n.data('namespace')===nsFilter)?'':'none');
+  });
+  cy.edges().forEach(function(e){
+    if(protoFilter&&e.data('protocol')&&e.data('protocol')!==protoFilter){e.style('display','none');return}
+    if(portF&&parseInt(e.data('port'))!==parseInt(portF)){e.style('display','none');return}
+    if(dirFilter&&e.data('direction')&&e.data('direction')!==dirFilter){e.style('display','none');return}
+    if(e.source().style('display')==='none'||e.target().style('display')==='none'){e.style('display','none');return}
+    e.style('display','');
+  });
+}
+
+/* --- SEARCH --- */
+function updateSearch(){
+  var q=document.getElementById('search-input').value.toLowerCase().trim();
+  var clear=document.getElementById('search-clear');
+  clear.className='search-clear'+(q?' show':'');
+  if(!q){
+    cy.nodes().style('display','');
+    cy.edges().style('display','');
+    return;
+  }
+  /* Find matched nodes */
+  var matchSet={};
+  cy.nodes().forEach(function(n){
+    var match=
+      n.id().toLowerCase().indexOf(q)>=0||
+      (n.data('label')||'').toLowerCase().indexOf(q)>=0||
+      (n.data('kind')||'').toLowerCase().indexOf(q)>=0||
+      (n.data('namespace')||'').toLowerCase().indexOf(q)>=0;
+    matchSet[n.id()]=match;
+  });
+  /* Reset all to hidden first */
+  cy.nodes().style('display','none');
+  cy.edges().style('display','none');
+  /* Re-show matched nodes + their connected edges */
+  var matched=[];
+  for(var id in matchSet){
+    if(matchSet[id]){
+      var n=cy.getElementById(id);
+      n.style('display','');
+      n.addClass('highlight');
+      matched.push(n);
+      n.connectedEdges().style('display','');
+    }
+  }
+  /* Also reveal hidden parent compartments of matched nodes */
+  for(var id in matchSet){
+    if(matchSet[id]){
+      var n=cy.getElementById(id);
+      if(n.data('parent')){
+        var parent=cy.getElementById(n.data('parent'));
+        if(parent.length){
+          parent.style('display','');
+          parent.style('z-index',1);
+        }
+      }
+    }
+  }
+  var msg=document.getElementById('search-msg');
+  msg.textContent=matched.length+' match'+(matched.length!==1?'es':'');
+}
+
+/* --- TOGGLE NAMESPACE --- */
+function toggleNS(nsId){
+  nsExpanded[nsId]=!nsExpanded[nsId];
+  var expanded=nsExpanded[nsId];
+  var node=cy.getElementById(nsId);
+  var children=cy.nodes().filter(function(n){return n.data('parent')===nsId});
+  var childIds=[];
+  children.forEach(function(c){
+    c.style('display',expanded?'':'none');
+    childIds.push(c.id());
+  });
+  /* Shrink compartment to a compact chip when collapsed; restore when expanded */
+  if(node.length){
+    var si=nsSizes[nsId]||{w:260,h:320};
+    node.style('width',expanded?(si.w||260):'label');
+    node.style('height',expanded?(si.h||320):'label');
+    node.style('text-valign',expanded?'top':'center');
+    node.style('text-margin-y',expanded?-18:0);
+  }
+  /* Hide/show edges connected to hidden children */
+  cy.edges().forEach(function(edge){
+    var srcID=edge.source().id(),tgtID=edge.target().id(),hidden=!expanded;
+    edge.style('display',(hidden&&(childIds.indexOf(srcID)>=0||childIds.indexOf(tgtID)>=0))?'none':'');
+  });
+  /* Keep overlay button icon in sync */
+  var b=nsBtnEls[nsId];
+  if(b){b.innerHTML=nsBtnIcon(expanded);b.title=nsBtnTitle(expanded)}
+  /* Refresh Details panel if it shows this namespace or one of its children */
+  if(selected&&(selected.id()===nsId||selected.data('parent')===nsId)){
+    showDetails(selected);
+  }
+}
+
+/* --- DETAILS PANEL --- */
+function edgeRow(e){
+  var d=esc(e.data('direction'));
+  var p=esc(e.data('protocol')||'');
+  var pn=esc(e.data('port')||'0');
+  var src=esc(e.data('source'));
+  var tgt=esc(e.data('target'));
+  return '<div class="detail-row"><div class="detail-label">'+d+'</div>'
+    +'<div class="detail-value">'+p+'/'+pn+' - '+src+' -&gt; '+tgt+'</div></div>';
+}
+
+function showDetails(el){
+  var p=document.getElementById('details-content');
+  if(!el){p.innerHTML='<div id="details-msg">Click a node or edge to see details</div>';return}
+  var h='';
+  if(el.isNode()){
+    h+='<div class="detail-row"><div class="detail-label">ID</div><div class="detail-value">'+esc(el.id())+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Kind</div><div class="detail-value"><span class="kind-tag kind-'+esc(el.data('kind'))+'">'+esc(el.data('kind'))+'</span></div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Label</div><div class="detail-value">'+esc(el.data('label'))+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Namespace</div><div class="detail-value">'+esc(el.data('namespace')||'-')+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Parent</div><div class="detail-value">'+esc(el.data('parent')||'none')+'</div></div>';
+    var conns=el.connectedEdges();
+    if(conns.length){
+      h+='<h3>Connected Edges ('+conns.length+')</h3>';
+      conns.forEach(function(e){h+=edgeRow(e)});
+    }
+    if(el.data('kind')==='namespace'){
+      var visC=el.children().filter(function(n){return n.style('display')!=='none'}).length;
+      var actionText=nsExpanded[el.id()]?'collapse':'expand';
+      h+='<div class="detail-row" style="margin-top:12px"><div class="ns-hint">'+visC+' children visible - ';
+      h+='<span style="color:var(--accent);cursor:pointer" data-toggle-ns="'+el.id()+'">';
+      h+=actionText+'</span></div></div>';
+    }
+  }else{
+    h+='<div class="detail-row"><div class="detail-label">Source</div><div class="detail-value">'+esc(el.data('source'))+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Target</div><div class="detail-value">'+esc(el.data('target'))+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Direction</div><div class="detail-value">'+esc(el.data('direction'))+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Protocol</div><div class="detail-value">'+esc(el.data('protocol')||'-')+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Port</div><div class="detail-value">'+esc(el.data('port')||'-')+'</div></div>';
+    h+='<div class="detail-row"><div class="detail-label">Description</div><div class="detail-value">'+esc(el.data('description')||'-')+'</div></div>';
+  }
+  p.innerHTML=h;
+}
+
+/* --- SHOW ALL NAMESPACES --- */
+function showAll(){
+  for(var k in nsExpanded){nsExpanded[k]=true}
+  cy.nodes('[kind="namespace"]').style('display','');
+  cy.edges().style('display','');
+  cy.nodes().filter(function(n){return n.data('kind')!=='namespace'}).forEach(function(cn){
+    var parent=cn.data('parent');
+    if(parent&&nsExpanded[parent]){cn.style('display','')}
+  });
+  /* Restore expanded compartment sizes (use computed sizes from nsSizes) */
+  cy.nodes('[kind="namespace"]').forEach(function(n){
+    var si=nsSizes[n.id()]||{w:260,h:320};
+    n.style('width',si.w||260);n.style('height',si.h||320);
+    n.style('text-valign','top');n.style('text-margin-y',-18);
+    var b=nsBtnEls[n.id()];
+    if(b){b.innerHTML=nsBtnIcon(true);b.title=nsBtnTitle(true)}
+  });
+}
+
+/* --- EVENTS --- */
+function bindEvents(){
+  /* Delegated click for data-toggle-ns in details panel */
+  var dc=document.getElementById('details-content');
+  if(dc){dc.addEventListener('click',function(ev){
+    var t=ev.target;
+    if(!t||!t.getAttribute){return}
+    var ns=t.getAttribute('data-toggle-ns');
+    if(ns){ev.preventDefault();ev.stopPropagation();toggleNS(ns)}
+  })}
+  /* Deselect when clicking empty canvas */
+  cy.on('tap',function(evt){
+    if(evt.target===cy){if(selected){selected.removeClass('selected');selected=null}showDetails(null)}
+  });
+  /* Node click */
+  cy.on('tap','node',function(evt){
+    evt.stopPropagation();
+    if(selected&&selected!==evt.target)selected.removeClass('selected');
+    evt.target.addClass('selected');selected=evt.target;showDetails(evt.target);
+  });
+  /* Edge click */
+  cy.on('tap','edge',function(evt){
+    evt.stopPropagation();
+    if(selected)selected.removeClass('selected');
+    evt.target.addClass('selected');selected=evt.target;showDetails(evt.target);
+  });
+  /* Custom tooltip on hover — dependency-free, no popover API needed */
+  cy.on('mouseover','node',function(evt){
+    var n=evt.target;
+    showTooltip(n,'ID: '+n.id()+'<br>Kind: '+n.data('kind')+'<br>Connections: '+n.degree());
+  });
+  cy.on('mouseout','node',hideTooltip);
+  cy.on('mouseover','edge',function(evt){
+    showTooltip(evt.target,(evt.target.data('protocol')||'')+'/'+evt.target.data('port')+' '+evt.target.data('direction'));
+  });
+  cy.on('mouseout','edge',hideTooltip);
+}
+
+/* --- MULTI-PHASE LAYOUT (fixes namespace stretch from dagre compound children) --- */
+/* Problem (A): gridLayoutInsideNses set ns width/height AFTER dagre positioned them.
+ * Grown ns (e.g. runai 620×462) then overwrote their neighbors → overlaps.
+ * Fix: compute target ns sizes BEFORE dagre so dagre reserves correct spacing.
+ */
+function computeNsSizes(){
+  cy.nodes('[kind="namespace"]').forEach(function(ns){
+    var ch=cy.nodes().filter(function(n){return n.data('parent')===ns.id()});
+    if(!ch.length)return;
+    var cnt=ch.length;
+    var cols=Math.max(1,Math.ceil(Math.sqrt(cnt)));
+    var rows=Math.ceil(cnt/cols);
+    /* Pre-compute: set size BEFORE dagre so it reserves this space */
+    var si=nsSizes[ns.id()];
+    if(!si){si={};nsSizes[ns.id()]=si}
+    si.w=cols*130+80;
+    si.h=rows*130+80;
+    si.cols=cols;
+    si.rows=rows;
+    si._computed=true;
+    ns.style('width',si.w);
+    ns.style('height',si.h);
+  });
+}
+/** @suppress{checkTypes} */
+function runMultiPhaseLayout(){
+  var nsCells={};
+  /* 1) Compute namespace sizes — children MUST be attached (filters by data('parent')). */
+  computeNsSizes();
+
+  /* 2) Hide selectors — dagre spreads them across full width via edges to workloads. */
+  cy.nodes('[kind="selector"]').forEach(function(s){s.style('display','none')});
+
+  /* 3) Grid children inside namespaces BEFORE parent grid. */
+  (function(){
+    cy.nodes('[kind="namespace"]').forEach(function(ns){
+      var ch=cy.nodes().filter(function(n){return n.data('parent')===ns.id()});
+      if(!ch.length)return;
+      var cnt=ch.length;
+      var cols=Math.max(1,Math.ceil(Math.sqrt(cnt)));
+      var c=ns.position();
+      var step=130;
+      ch.forEach(function(child,idx){
+        var r=Math.floor(idx/cols),c2=idx%cols;
+        child.position({x:c.x+(c2-(cols-1)/2)*step,y:c.y+(r-0.5)*step});
+      });
+    });
+  })();
+
+  /* 4) Parent grid: place each namespace on its deterministic grid cell.
+   * Callable again when measured sizes grow after the first rendered frame. */
+  function placeParentGrid(){
+    var nsList=[];
+    cy.nodes('[kind="namespace"]').forEach(function(ns){nsList.push(ns)});
+    nsList.sort(function(a,b){return a.id()<b.id()?-1:a.id()>b.id()?1:0});
+    var n=nsList.length;
+    if(n===0)return;
+    var colCount=Math.max(1,Math.min(6,Math.ceil(Math.sqrt(n))));
+    var gapX=60,gapY=60;
+    var cellW={},cellH={};
+    nsList.forEach(function(ns){
+      var si=nsSizes[ns.id()]||{w:260,h:320};
+      cellW[ns.id()]=si.w||260;
+      cellH[ns.id()]=si.h||320;
+    });
+    var colWidths=[],colHeights=[];
+    for(var c=0;c<colCount;c++){colWidths[c]=0;colHeights[c]=0}
+    nsList.forEach(function(ns,idx){
+      var c=idx%colCount;
+      if(cellW[ns.id()]>colWidths[c])colWidths[c]=cellW[ns.id()];
+      colHeights[c]+=cellH[ns.id()];
+    });
+    var colX=[],x=0;
+    for(var c=0;c<colCount;c++){colX[c]=x;x+=colWidths[c]+gapX}
+    var colCursor=[];
+    for(var c=0;c<colCount;c++){colCursor[c]=0}
+    nsList.forEach(function(ns,idx){
+      var c=idx%colCount;
+      /* BUG 1 fix: position() sets node CENTER; column center is colX[c]+colWidths[c]/2. */
+      ns.position({x:colX[c]+colWidths[c]/2,y:colCursor[c]+cellH[ns.id()]/2});
+      nsCells[ns.id()]={x:colX[c]+colWidths[c]/2,y:colCursor[c]+cellH[ns.id()]/2};
+      colCursor[c]+=cellH[ns.id()]+gapY;
+    });
+  }
+
+  /* 5) Lane: position ALL free nodes (selector+reserved+cidr), traffic-aware meanY order. */
+  function placeLane(){
+    var freeNodes=cy.nodes('[kind="selector"], [kind="reserved"], [kind="cidr"]');
+    if(freeNodes.length>0){
+      freeNodes.style('display','');
+      var nonSel=cy.nodes().filter(function(n){
+        return n.data('kind')!=='selector'&&n.data('kind')!=='reserved'&&n.data('kind')!=='cidr';
+      });
+      var bb=nonSel.boundingBox({includeLabels:true,includeNodes:true,includeEdges:false});
+      var baseX=bb.x2;
+      var midY=(bb.y1+bb.y2)/2;
+      var totalH=bb.y2-bb.y1;
+
+      function meanYOf(nodeId){
+        var nsIds=[],seen={};
+        cy.getElementById(nodeId).connectedEdges().forEach(function(e){
+          [e.data('source'),e.data('target')].forEach(function(nid){
+            var nd=cy.getElementById(nid);
+            var p=nd.data('parent');
+            if(nd.length&&p&&!seen[p]){seen[p]=true;nsIds.push(p)}
+          });
+        });
+        if(!nsIds.length)return Infinity;
+        var s=0;
+        nsIds.forEach(function(id){s+=cy.getElementById(id).position().y});
+        return s/nsIds.length;
+      }
+
+      var frees=[];
+      freeNodes.forEach(function(n){frees.push(n)});
+      frees.sort(function(a,b){
+        var ma=meanYOf(a.id()),mb=meanYOf(b.id());
+        return ma!==mb?(ma<mb?-1:1):(a.id()<b.id()?-1:a.id()>b.id()?1:0);
+      });
+
+      var colW=200,rowH=200,margin=50;
+      var cols=6;
+      var rows6=Math.ceil(frees.length/cols);
+      if(totalH>0&&rows6*rowH>totalH*1.2){
+        var cols8=Math.ceil(frees.length/Math.ceil(rows6/1.8));
+        cols=Math.max(8,Math.min(10,cols8));
+      }
+      var totalRows=Math.ceil(frees.length/cols);
+      for(var i=0;i<frees.length;i++){
+        var r=Math.floor(i/cols),c=i%cols;
+        frees[i].position({x:baseX+margin+(c+0.5)*colW,y:midY+(r-(totalRows-1)/2)*rowH});
+      }
+    }
+  }
+
+  placeParentGrid();
+  placeLane();
+  cy.fit({padding:50});
+
+  /* BUG 2+3: after the first RENDERED frame (labels/fonts settled, geometry final):
+   * 1) re-measure final bboxes; if any cell grew, re-run grid+lane once;
+   * 2) drift-correct using the RENDERED bbox center (ns.position() is the model pos
+   *    which already equals the cell — the rendered box is what actually drifts);
+   * 3) re-anchor the lane after correction, then one final fit. */
+  requestAnimationFrame(function(){requestAnimationFrame(function(){
+    var grew=false;
+    cy.nodes('[kind="namespace"]').forEach(function(ns){
+      var b=ns.boundingBox({includeLabels:true,includeNodes:true,includeEdges:false});
+      if(!b)return;
+      var si=nsSizes[ns.id()];
+      if(!si){si={};nsSizes[ns.id()]=si}
+      var w=(b.x2-b.x1)||260,h=(b.y2-b.y1)||320;
+      if(w>si.w||h>si.h){si.w=w;si.h=h;grew=true}
+    });
+    if(grew){
+      placeParentGrid();
+      placeLane();
+    }
+    var round=0;
+    function correct(){
+      round++;
+      var maxDrift=0;
+      cy.nodes('[kind="namespace"]').forEach(function(ns){
+        var cell=nsCells[ns.id()];
+        if(!cell)return;
+        var b=ns.boundingBox({includeLabels:true,includeNodes:true,includeEdges:false});
+        if(!b)return;
+        var dx=((b.x1+b.x2)/2)-cell.x,dy=((b.y1+b.y2)/2)-cell.y;
+        if(Math.abs(dx)<0.5&&Math.abs(dy)<0.5)return;
+        if(Math.abs(dx)>maxDrift)maxDrift=Math.abs(dx);
+        if(Math.abs(dy)>maxDrift)maxDrift=Math.abs(dy);
+        cy.nodes().filter(function(c){return c.data('parent')===ns.id()}).forEach(function(child){
+          var cp=child.position();
+          child.position({x:cp.x-dx,y:cp.y-dy});
+        });
+      });
+      if(maxDrift>0.5&&round<6){requestAnimationFrame(correct);return}
+      placeLane();
+      cy.fit({padding:50});
+    }
+    correct();
+  });});
+}
+/* --- INIT --- */
+function init(){
+  if(DATA.nodes.length===0&&DATA.edges.length===0){
+    document.getElementById('cy').style.display='none';
+    document.getElementById('loading').style.display='none';
+    document.getElementById('no-traffic').style.display='block';
+    return;
+  }
+  cy=cytoscape({
+    container:document.getElementById('cy'),
+    elements:DATA,
+    style:[
+       {selector:'node.compartment',style:{'background-color':'#1a3a5c','border-color':'#2563a0',
+         'border-width':2,'background-opacity':0.6,'shape':'roundrectangle','width':260,'height':320,
+         'padding':24,'label':'data(label)','text-valign':'top','text-halign':'center','color':'#58a6ff',
+         'font-size':12,'font-weight':'bold','text-wrap':'wrap','text-max-width':200,'overlay-opacity':0,
+         'text-margin-y':-18}},
+      {selector:'node.compartment:parent',style:{'overlay-opacity':0.15,'overlay-color':'#2563a0'}},
+      {selector:'node.workload',style:{'background-color':'#1f6feb','color':'#fff',
+        'text-outline-width':1,'text-outline-color':'#0d1117','text-valign':'center',
+        'text-halign':'center','shape':'ellipse','width':56,'height':56,'font-size':'9px',
+        'overlay-opacity':0,'content':function(e){return e.data('label')}}},
+      {selector:'node.reserved',style:{'background-color':'#d73a49','color':'#fff','content':function(e){return e.data('label')||''},
+        'text-outline-width':0,'text-valign':'center','text-halign':'center',
+        'shape':'ellipse','width':'label','height':'label','padding':8,'font-size':'11px',
+        'overlay-opacity':0}},
+      {selector:'node.cidr',style:{'background-color':'#6e40c9','color':'#fff','content':function(e){return e.data('label')||''},
+        'text-outline-width':0,'text-valign':'center','text-halign':'center',
+        'shape':'ellipse','width':'label','height':'label','padding':8,'font-size':'11px',
+        'overlay-opacity':0}},
+      {selector:'node.selector',style:{'background-color':'#d29922','color':'#0d1117','content':function(e){return e.data('label')||''},
+        'text-outline-width':0,'text-valign':'center','text-halign':'center',
+        'shape':'ellipse','width':180,'height':'label','padding':8,'font-size':'11px',
+        'text-wrap':'ellipsis','text-max-width':160,'overlay-opacity':0}},
+      {selector:'edge',style:{'width':2,'line-color':'#ccc','target-arrow-color':'#ccc',
+        'target-arrow-shape':'triangle','content':function(e){return e.data('label')||((e.data('protocol')||'')+':'+(e.data('port')||''))},'color':'#c9d1d9','font-size':9,'text-background-color':'#161b22','text-background-opacity':0.7,'text-background-padding':2,'arrow-scale':1.4}},
+      {selector:'edge.ingress',style:{'line-color':'#8b5cf6','target-arrow-color':'#8b5cf6',
+        'line-style':'dashed'}},
+      {selector:'edge.egress',style:{'line-color':'#38bdf8','target-arrow-color':'#38bdf8',
+        'line-style':'solid'}},
+      {selector:'highlight',style:{'outline-width':3,'outline-color':'#58a6ff',
+        'outline-opacity':0.8,'outline-offset':4}},
+    ],
+    /* Construction layout must NOT move nodes: the inlined cytoscape dagre
+       extension runs its layout pass asynchronously (deferred), which would
+       clobber the positions set synchronously by runMultiPhaseLayout() below.
+       Use 'preset' (no-op) — runMultiPhaseLayout() does all positioning. */
+    layout:{name:'preset'},
+    minZoom:0.05,maxZoom:3,
+    userPanningEnabled:true,userZoomingEnabled:true,
+    selectionType:'single',
+    autounselectify:true,
+  });
+  bindEvents();
+
+  /* --- NS COLLAPSE BUTTONS OVERLAY --- */
+  var nsBtns={};
+  function positionNsButtons(){
+    for(var k in nsBtns){
+      var btn=nsBtns[k];if(!btn)continue;
+      var node=cy.getElementById(k);
+      if(!node.length||node.style('display')==='none'){btn.style.display='none';continue}
+      /* Anchor INSIDE the node's own rectangle (top-left corner), not the
+         bounding box which also contains the label floating above the box */
+      var rp=node.renderedPosition();
+      var w=node.renderedOuterWidth(),h=node.renderedOuterHeight();
+      btn.style.left=(rp.x-w/2+4)+'px';
+      btn.style.top=(rp.y-h/2+4)+'px';
+      btn.style.display='flex';
+    }
+  }
+  function createNsButtons(){
+    var container=document.getElementById('ns-btn-container');
+    if(!container)return;
+    cy.nodes('[kind="namespace"]').each(function(node){
+      var id=node.id();
+      if(nsBtns[id])return;
+      var btn=document.createElement('button');
+      btn.innerHTML=nsBtnIcon(true);
+      btn.title=nsBtnTitle(true);
+      btn.setAttribute('data-toggle-ns',id);
+      btn.addEventListener('click',function(ev){
+        ev.preventDefault();ev.stopPropagation();toggleNS(id);
+      });
+      container.appendChild(btn);
+      nsBtns[id]=btn;
+      nsBtnEls[id]=btn;
+    });
+  }
+  createNsButtons();
+  /* Track movement so buttons follow pan/zoom/layout */
+  cy.on('render',function(){positionNsButtons()});
+  cy.on('pan zoom',function(){positionNsButtons()});
+  /* layoutstop for the preset construction layout fires before this handler is
+     registered, so the multi-phase layout runs explicitly below instead */
+  cy.on('layoutstop',function(){positionNsButtons()});
+  /* Multi-phase layout: run explicitly because the initial dagre (from the
+     construction options) completes synchronously during cytoscape() and its
+     layoutstop fires before any cy.on('layoutstop') can be registered */
+  runMultiPhaseLayout();
+  /* Initial position after layout has run */
+  positionNsButtons();
+
+  /* Populate filter selects */
+  var sel;
+  sel=function(id,list){
+    var s=document.getElementById(id);
+    if(s){list.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;s.appendChild(o)})}
+  };
+  sel('filter-ns',NS_LIST);
+  sel('filter-proto',PROTO_LIST);
+  sel('filter-dir',DIR_LIST);
+
+  document.getElementById('filter-ns').addEventListener('change',applyFilters);
+  document.getElementById('filter-proto').addEventListener('change',applyFilters);
+  document.getElementById('filter-port').addEventListener('input',applyFilters);
+  document.getElementById('filter-dir').addEventListener('change',applyFilters);
+  document.getElementById('search-input').addEventListener('input',updateSearch);
+  document.getElementById('search-clear').addEventListener('click',function(){
+    document.getElementById('search-input').value='';updateSearch();
+  });
+  document.getElementById('export-png').addEventListener('click',function(){exportImage('png')});
+  document.getElementById('export-jpg').addEventListener('click',function(){exportImage('jpg')});
+  document.getElementById('btn-show-all').addEventListener('click',function(){showAll()});
+
+  /* --- ISSUE D: Zoom controls --- */
+  (function(){
+    var zin=document.getElementById('zoom-in');
+    var zout=document.getElementById('zoom-out');
+    var zfit=document.getElementById('zoom-fit');
+    var MIN_ZOOM=0.05,MAX_ZOOM=3,ZOOM_FACTOR=1.25;
+    if(zin){zin.addEventListener('click',function(){var z=cy.zoom();if(z*ZOOM_FACTOR<=MAX_ZOOM){cy.zoom(z*ZOOM_FACTOR)}})}
+    if(zout){zout.addEventListener('click',function(){var z=cy.zoom();if(z/ZOOM_FACTOR>=MIN_ZOOM){cy.zoom(z/ZOOM_FACTOR)}})}
+    if(zfit){zfit.addEventListener('click',function(){cy.fit({padding:50})})}
+  })();
+}
+
+if(typeof cytoscape==='function'){
+  init();
+}else{
+  document.getElementById('cy').innerHTML='<div style="padding:40px;color:var(--danger)">Cytoscape.js failed to load</div>';
+}
+
+})();
+</script>
+</body>
+</html>

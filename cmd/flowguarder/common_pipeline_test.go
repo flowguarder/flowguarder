@@ -2390,7 +2390,7 @@ func TestNPOnHubbleWarning_ReservedEgress(t *testing.T) {
 			rd := &rootCmdData{policyFormat: tc.policyFormat, format: "text"}
 			cfg := config.Config{}
 
-			err := executeAnalysis(cmd, flows, cfg, rd, tc.sourceType)
+			err := executeAnalysis(cmd, flows, cfg, rd, tc.sourceType, "")
 
 			w.Close()
 			os.Stderr = old
@@ -2484,7 +2484,7 @@ func TestExecuteAnalysisFormatSelection(t *testing.T) {
 			}
 			cfg := config.Config{}
 
-			err := executeAnalysis(cmd, flows, cfg, rd, tc.sourceType)
+			err := executeAnalysis(cmd, flows, cfg, rd, tc.sourceType, "")
 			require.NoError(t, err)
 
 			entries, err := os.ReadDir(rd.outputDir)
@@ -2512,4 +2512,340 @@ func TestExecuteAnalysisFormatSelection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestVisualizeHTMLWritten verifies that executeAnalysis generates
+// flowguarder-visualization.html when outputDir is set and skipVisualize is false.
+func TestVisualizeHTMLWritten(t *testing.T) {
+	t.Parallel()
+
+	flows := []flow.Flow{
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	rd := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    t.TempDir(),
+	}
+	cfg := config.Config{}
+
+	err := executeAnalysis(cmd, flows, cfg, rd, parser.SourceAuto, "/testdata/hubble-flows.jsonl")
+	require.NoError(t, err)
+
+	htmlPath := filepath.Join(rd.outputDir, "flowguarder-visualization.html")
+	assert.FileExists(t, htmlPath, "flowguarder-visualization.html should exist in output directory")
+
+	data, err := os.ReadFile(htmlPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "<html", "HTML file should contain <html>")
+}
+
+// TestVisualizeHTMLSkipped verifies that setting skipVisualize=true
+// suppresses the HTML file output.
+func TestVisualizeHTMLSkipped(t *testing.T) {
+	t.Parallel()
+
+	flows := []flow.Flow{
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	rd := &rootCmdData{
+		format:        "text",
+		policyFormat:  "auto",
+		outputDir:     t.TempDir(),
+		skipVisualize: true,
+	}
+	cfg := config.Config{}
+
+	err := executeAnalysis(cmd, flows, cfg, rd, parser.SourceAuto, "/testdata/hubble-flows.jsonl")
+	require.NoError(t, err)
+
+	htmlPath := filepath.Join(rd.outputDir, "flowguarder-visualization.html")
+	assert.NoFileExists(t, htmlPath, "flowguarder-visualization.html should NOT exist when skipVisualize is true")
+}
+
+// TestVisualizeHTMLNoOutputDir ensures no HTML file is created
+// when no output directory is specified.
+func TestVisualizeHTMLNoOutputDir(t *testing.T) {
+	t.Parallel()
+
+	flows := []flow.Flow{
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	rd := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    "", // no output dir
+	}
+	cfg := config.Config{}
+
+	err := executeAnalysis(cmd, flows, cfg, rd, parser.SourceAuto, "")
+	require.NoError(t, err)
+
+	// No output dir means no HTML file should be created anywhere.
+	// We cannot easily assert "no file anywhere" without a fixed tmp path,
+	// so we just verify the pipeline completed successfully with no error.
+}
+
+// TestVisualizeHTMLDeterministic verifies that the HTML visualization output
+// is byte-identical across two independent runs with identical input flows.
+// It also asserts idempotent overwrites when running twice into the same dir.
+func TestVisualizeHTMLDeterministic(t *testing.T) {
+	t.Parallel()
+
+	flows := []flow.Flow{
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "staging", PodName: "api", IP: "10.0.1.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "cache", IP: "10.0.0.3"},
+			Layer4:      flow.Layer4{DestPort: 6379, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+	}
+
+	// --- Cross-directory determinism: two separate temp dirs ---
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	cmdA := &cobra.Command{}
+	cmdA.SetOut(io.Discard)
+	cmdA.SetErr(io.Discard)
+	rdA := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    dirA,
+	}
+
+	cmdB := &cobra.Command{}
+	cmdB.SetOut(io.Discard)
+	cmdB.SetErr(io.Discard)
+	rdB := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    dirB,
+	}
+
+	cfg := config.Config{}
+
+	err := executeAnalysis(cmdA, flows, cfg, rdA, parser.SourceAuto, "")
+	require.NoError(t, err)
+	err = executeAnalysis(cmdB, flows, cfg, rdB, parser.SourceAuto, "")
+	require.NoError(t, err)
+
+	htmlA := filepath.Join(dirA, "flowguarder-visualization.html")
+	htmlB := filepath.Join(dirB, "flowguarder-visualization.html")
+	dataA, err := os.ReadFile(htmlA)
+	require.NoError(t, err)
+	dataB, err := os.ReadFile(htmlB)
+	require.NoError(t, err)
+
+	require.Equal(t, dataA, dataB, "HTML output must be byte-identical across two runs with identical input")
+
+	// --- Idempotent overwrite: same output dir twice ---
+	htmlSame := filepath.Join(dirA, "flowguarder-visualization.html")
+	dataFirst := dataA
+
+	// Run again into the same directory.
+	cmdAgain := &cobra.Command{}
+	cmdAgain.SetOut(io.Discard)
+	cmdAgain.SetErr(io.Discard)
+	rdAgain := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    dirA,
+	}
+
+	err = executeAnalysis(cmdAgain, flows, cfg, rdAgain, parser.SourceAuto, "")
+	require.NoError(t, err)
+
+	dataSecond, err := os.ReadFile(htmlSame)
+	require.NoError(t, err)
+
+	assert.Equal(t, dataFirst, dataSecond, "HTML output must be unchanged after idempotent overwrite into same directory")
+}
+
+// TestVisualizeHTMLNoTimestamps asserts that the generated HTML contains
+// no random identifiers, timestamps, or epoch-numeric sequences that
+// would indicate non-deterministic output.
+func TestVisualizeHTMLNoTimestamps(t *testing.T) {
+	t.Parallel()
+
+	flows := []flow.Flow{
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	rd := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    t.TempDir(),
+	}
+	cfg := config.Config{}
+
+	err := executeAnalysis(cmd, flows, cfg, rd, parser.SourceAuto, "")
+	require.NoError(t, err)
+
+	htmlPath := filepath.Join(rd.outputDir, "flowguarder-visualization.html")
+	data, err := os.ReadFile(htmlPath)
+	require.NoError(t, err)
+
+	html := string(data)
+
+	// 1. No ISO-8601 / YYYY-MM-DD date strings.
+	dateRe := regexp.MustCompile(`\b20[0-9]{2}-[0-9]{2}-[0-9]{2}\b`)
+	assert.False(t, dateRe.MatchString(html), "HTML must not contain date strings like 2026-08-13")
+
+	// 2. No Unix epoch timestamps (10+ digit standalone numbers — 10 digits = 1970-02-24 epoch start).
+	epochRe := regexp.MustCompile(`\b1[0-9]{9,}\b`)
+	assert.False(t, epochRe.MatchString(html), "HTML must not contain epoch-numeric timestamps")
+
+	// 3. No "Generated at" marker.
+	assert.NotContains(t, html, "Generated at", "HTML must not contain 'Generated at' text")
+
+	// 4. No ISO-8601 timestamp pattern with 'T' separator.
+	isoRe := regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`)
+	assert.False(t, isoRe.MatchString(html), "HTML must not contain ISO-8601 timestamps")
+
+	// 5. No bare hex UUID pattern (8-4-4-4-12).
+	uuidRe := regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	assert.False(t, uuidRe.MatchString(html), "HTML must not contain UUID-form strings")
+}
+
+// TestVisualizeHTMLStructure asserts that the generated HTML contains real graph
+// data derived from input flows: namespaces, workloads, and edges with port/protocol.
+func TestVisualizeHTMLStructure(t *testing.T) {
+	t.Parallel()
+
+	// Fixture: 4 flows spanning 2 namespaces (prod, staging) and 3 workloads
+	// (prod/web, prod/db, staging/api), producing ≥2 edges.
+	flows := []flow.Flow{
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "staging", PodName: "api", IP: "10.0.1.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "db", IP: "10.0.0.2"},
+			Layer4:      flow.Layer4{DestPort: 5432, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "staging", PodName: "api", IP: "10.0.1.1"},
+			Layer4:      flow.Layer4{DestPort: 8080, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+		{
+			Direction:   flow.Egress,
+			Source:      flow.Endpoint{Namespace: "prod", PodName: "web", IP: "10.0.0.1"},
+			Destination: flow.Endpoint{Namespace: "prod", PodName: "cache", IP: "10.0.0.3"},
+			Layer4:      flow.Layer4{DestPort: 6379, Protocol: flow.TCP},
+			Verdict:     flow.Allow,
+		},
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	rd := &rootCmdData{
+		format:       "text",
+		policyFormat: "auto",
+		outputDir:    t.TempDir(),
+	}
+	cfg := config.Config{}
+
+	err := executeAnalysis(cmd, flows, cfg, rd, parser.SourceAuto, "")
+	require.NoError(t, err)
+
+	htmlPath := filepath.Join(rd.outputDir, "flowguarder-visualization.html")
+	data, err := os.ReadFile(htmlPath)
+	require.NoError(t, err)
+
+	html := string(data)
+
+	// 1. GRAPH_DATA JSON blob must exist.
+	assert.Contains(t, html, "var GRAPH_DATA =", "HTML must contain GRAPH_DATA declaration")
+
+	// 2. Namespace nodes must appear: "prod" and "staging" should be in the graph data
+	// as node IDs in the nodes array (namespace nodes have ID = namespace name).
+	// The HTML contains the GRAPH_DATA JSON; check for namespace presence.
+	assert.Contains(t, html, `"id":"prod"`, "HTML must contain namespace node 'prod'")
+	assert.Contains(t, html, `"id":"staging"`, "HTML must contain namespace node 'staging'")
+
+	// 3. Workload nodes must appear: namespace/name format.
+	assert.Contains(t, html, `"id":"prod/web"`, "HTML must contain workload node 'prod/web'")
+	assert.Contains(t, html, `"id":"prod/db"`, "HTML must contain workload node 'prod/db'")
+	assert.Contains(t, html, `"id":"staging/api"`, "HTML must contain workload node 'staging/api'")
+
+	// 4. Edge data must contain source/target port + protocol labels.
+	// Edges in GRAPH_DATA JSON have source/target/protocol/port fields.
+	// Port and protocol values come directly from flows (uppercase).
+	assert.Contains(t, html, `"protocol":"TCP"`, "HTML must contain protocol 'TCP' in edge data")
+	assert.Contains(t, html, `"source"`, "HTML must contain 'source' field in edge data")
+	assert.Contains(t, html, `"target"`, "HTML must contain 'target' field in edge data")
+
+	// 5. The edge data must reference actual node IDs from the graph.
+	// After BuildGraph, edge source/target should be workload IDs like "prod/web".
+	assert.Contains(t, html, `"source":"prod/web"`, "HTML edge data must reference source node 'prod/web'")
+	assert.Contains(t, html, `"target":"prod/db"`, "HTML edge data must reference target node 'prod/db'")
+
+	// 6. The data array key in GRAPH_DATA must have nodes and edges.
+	assert.Contains(t, html, `"nodes"`, "HTML must contain 'nodes' key in GRAPH_DATA")
+	assert.Contains(t, html, `"edges"`, "HTML must contain 'edges' key in GRAPH_DATA")
 }

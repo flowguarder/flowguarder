@@ -13,7 +13,7 @@ var rootFlags rootCmdData
 var rootCmd = &cobra.Command{
 	Use:     "flowguarder",
 	Short:   "Network flow analysis CLI",
-	Version: "1.1.0",
+	Version: "1.2.0",
 	Long: `flowguarder - Network flow analysis CLI
 
 Analyzes Kubernetes network flows from Hubble, Calico, or other CNI log sources,
@@ -47,6 +47,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&rootFlags.policyFormat, "policy-format", "auto", "policy output format: auto, np, cnp")
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.cilium, "cilium", false, "emit CiliumNetworkPolicy instead of NetworkPolicy (hidden, alias for --policy-format=cnp)")
 	_ = rootCmd.PersistentFlags().MarkHidden("cilium")
+	rootCmd.PersistentFlags().BoolVar(&rootFlags.skipVisualize, "skip-visualize", false, "skip generating flowguarder-visualization.html")
+
 	rootCmd.PersistentFlags().StringVar(&rootFlags.kubeconfig, "kubeconfig", "", "path to kubeconfig for dry-run diff")
 
 	// Hide the kubeconfig flag from the help text for this subcommand (it's only used by `live`)

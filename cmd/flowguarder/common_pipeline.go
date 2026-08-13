@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/flowguarder/flowguarder/cmd/flowguarder/visualize"
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/anomaly"
 	"github.com/flowguarder/flowguarder/pkg/config"
@@ -46,6 +47,7 @@ type rootCmdData struct {
 	reports           []string
 	topN              int
 	generateUncovered bool
+	skipVisualize     bool
 }
 
 var validReports = map[string]bool{
@@ -144,7 +146,7 @@ func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) 
 		ds := &ingest.DirSource{Path: sourcePath, Pattern: pattern}
 		igSource = ds
 		// Use DirSource.Iterate for directories
-		return ingestDir(cmd, igSource.(*ingest.DirSource), cfg, rd, sourceType)
+		return ingestDir(cmd, igSource.(*ingest.DirSource), cfg, rd, sourceType, sourcePath)
 	} else {
 		igSource = ingest.NewFileSource(sourcePath)
 	}
@@ -178,11 +180,11 @@ func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) 
 		return nil
 	}
 
-	return executeAnalysis(cmd, flows, cfg, rd, sourceType)
+	return executeAnalysis(cmd, flows, cfg, rd, sourceType, sourcePath)
 }
 
 // ingestDir handles directory scanning for DirSource.
-func ingestDir(cmd *cobra.Command, src *ingest.DirSource, cfg config.Config, rd *rootCmdData, sourceType parser.Source) error {
+func ingestDir(cmd *cobra.Command, src *ingest.DirSource, cfg config.Config, rd *rootCmdData, sourceType parser.Source, sourcePath string) error {
 	var allFlows []flow.Flow
 
 	p, err := parser.SelectParser(sourceType, parser.SourceAuto)
@@ -222,7 +224,7 @@ func ingestDir(cmd *cobra.Command, src *ingest.DirSource, cfg config.Config, rd 
 		return nil
 	}
 
-	return executeAnalysis(cmd, allFlows, cfg, rd, sourceType)
+	return executeAnalysis(cmd, allFlows, cfg, rd, sourceType, sourcePath)
 }
 
 // autoDetectSource tries to detect the flow-log source from a file, directory or stdin.
@@ -262,7 +264,7 @@ func parseFlagSource(s string) parser.Source {
 }
 
 // executeAnalysis runs the full analysis pipeline on parsed flows.
-func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, rd *rootCmdData, sourceType parser.Source) error {
+func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, rd *rootCmdData, sourceType parser.Source, sourcePath string) error {
 	effectiveFormat := resolvePolicyFormat(rd.policyFormat, sourceType)
 
 	// 5. Aggregate workloads
@@ -312,6 +314,15 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 			}
 		}
 		cmd.Printf("Wrote policy files to %s\n", outDir)
+
+		// 10a. Generate HTML visualization
+		src := sourcePath
+		if src == "-" {
+			src = "stdin"
+		}
+		if err := writeVisualizationHTML(outDir, pols, src, rd.skipVisualize); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write visualization: %v\n", err)
+		}
 	}
 
 	// 10b. Generate uncovered policies
@@ -419,6 +430,48 @@ func writeCiliumYAML(dir string, pols []policy.Policy, flows []flow.Flow, worklo
 	}
 
 	return policy.WriteCiliumYAML(cnps, dir)
+}
+
+// writeVisualizationHTML generates an HTML visualization of the policy graph
+// and writes it atomically to outDir as "flowguarder-visualization.html".
+// If skip is true or outDir is empty the function is a no-op (returns nil).
+func writeVisualizationHTML(outDir string, pols []policy.Policy, source string, skip bool) error {
+	if skip || outDir == "" {
+		return nil
+	}
+
+	g := visualize.BuildGraph(pols)
+
+	tmpFile, err := os.CreateTemp(outDir, ".viz-*.html.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+
+	// Ensure cleanup on any failure path: close and remove the temp file.
+	// os.Remove on a nonexistent path is a harmless no-op error.
+	defer func() {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+	}()
+
+	if err := visualize.RenderHTMLWithSource(g, tmpFile, source); err != nil {
+		return fmt.Errorf("rendering visualization: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, filepath.Join(outDir, "flowguarder-visualization.html")); err != nil {
+		return fmt.Errorf("renaming visualization file: %w", err)
+	}
+
+	if err := os.Chmod(filepath.Join(outDir, "flowguarder-visualization.html"), 0644); err != nil {
+		return fmt.Errorf("chmod visualization file: %w", err)
+	}
+
+	return nil
 }
 
 // configIPNetSlice converts []string CIDRs to []*net.IPNet for the config.
