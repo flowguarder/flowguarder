@@ -28,14 +28,14 @@
 | Modify the demo environment | `kind-config.yaml`, `demo-pods.yaml`, `Dockerfile`, `entrypoint.sh` |
 
 ## CONVENTIONS
-- The 17MB `hubble-flows-before.jsonl` is load-bearing: it is consumed by the frozen review gates (`review5_test.go`, `review6_test.go`) and the README quick-start examples. Do NOT delete, truncate, or regenerate it without checking those gates.
+- The 17MB `hubble-flows-before.jsonl` is load-bearing: consumed by frozen review gates (`review5_test.go`, `review6_test.go`), README quick-start, and `make test` (CI runs review5/review6 against this fixture). Do NOT delete, truncate, or regenerate it without checking those gates.
 - Generated policy artifacts from this dataset land in untracked `policies-calico/`, `policies-hubble/`, `policies-hubble-cilium/` dirs; the old `policies2/` dir was removed in commit de4b49e ("output removal").
 - `dump-hubble` emits raw protobuf flow JSON with `EmitUnpopulated: false` to avoid zero-valued enum fields that the Hubble parser would reject.
 
 ## ANTI-PATTERNS
 - Do NOT create a third `main` package in this directory without a strong reason.
-- Do NOT commit the 17MB fixture into a new location or duplicate it.
+- Do NOT move or duplicate the 17MB fixture (`flowlab/hubble-flows-before.jsonl`) — it is tracked exactly where the review gates expect it (fixturePath fallback chain: `../../flowlab/` → `flowlab/` → `testdata/`).
 - Do NOT couple flowlab tooling into `pkg/` or `cmd/` logic.
 
 ## NOTES
-- `hubble-flows-before.jsonl` is untracked in git — if git status shows it missing, it was NOT deleted; check `.gitignore` before regenerating.
+- `hubble-flows-before.jsonl` is tracked in git (committed 334abec) — CI and the frozen review gates depend on it; if git status shows it modified, restore it rather than regenerating.

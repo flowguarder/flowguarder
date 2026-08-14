@@ -467,6 +467,7 @@ func writeVisualizationHTML(outDir string, pols []policy.Policy, source string, 
 		return fmt.Errorf("renaming visualization file: %w", err)
 	}
 
+	// #nosec G302 -- visualization HTML must stay world-readable (0644)
 	if err := os.Chmod(filepath.Join(outDir, "flowguarder-visualization.html"), 0644); err != nil {
 		return fmt.Errorf("chmod visualization file: %w", err)
 	}

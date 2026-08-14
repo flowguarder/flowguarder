@@ -191,15 +191,6 @@ func BuildGraph(pols []policy.Policy) Graph {
 	edges := make(map[edgeKey]*Edge)
 
 	for _, pol := range pols {
-		// Derive workload namespace (split WorkloadID on first "/" if
-		// WorkloadNamespace is empty).
-		ns := pol.WorkloadNamespace
-		if ns == "" && pol.WorkloadID != "" {
-			if i := strings.Index(pol.WorkloadID, "/"); i >= 0 {
-				ns = pol.WorkloadID[:i]
-			}
-		}
-
 		wID := pol.WorkloadID
 		if wID == "" {
 			continue

@@ -13,7 +13,7 @@ var rootFlags rootCmdData
 var rootCmd = &cobra.Command{
 	Use:     "flowguarder",
 	Short:   "Network flow analysis CLI",
-	Version: "1.2.0",
+	Version: version,
 	Long: `flowguarder - Network flow analysis CLI
 
 Analyzes Kubernetes network flows from Hubble, Calico, or other CNI log sources,

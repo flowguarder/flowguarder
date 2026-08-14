@@ -12,9 +12,9 @@ Generates source-agnostic `Policy` objects from flows, applies dual-carry (CIDR 
 | Change YAML output format | `cilium.go` — `WriteCiliumYAML()`, `marshalCNPWithComment()` |
 | Adjust BuildOptions flags | `builder.go` — `BuildOptions` struct (Cilium, DefaultDeny, Strict, ExcludeAnomalyTypes) |
 | Update FQDN / L7 hint logic | `cilium.go` — `collectL7Hints()`, `findEgressHints()`, `dedupL7Rules()` |
-| Modify NetPol CIDR twin generation | `builder.go` — `classifySyntheticPeer()` (~405) |
-| Modify entity sentinel computation | `builder.go` — `reservedEntities()` (~370); `cilium.go` — `resolveEntitySet()` (~543) |
-| Override port → apiserver | `builder.go` — `isKubeAPIServerPeer()` (~401), `isKubeAPIServerWorkload()` (~466); scoped override (Review9/BUG11) |
+| Modify NetPol CIDR twin generation | `builder.go` — `classifySyntheticPeer()` (418) |
+| Modify entity sentinel computation | `builder.go` — `reservedEntities()` (369); `cilium.go` — `resolveEntitySet()` (549) |
+| Override port → apiserver | `builder.go` — `isKubeAPIServerPeer()` (386), `isKubeAPIServerWorkload()` (451); scoped override (Review9/BUG11) |
 
 ## DUAL-CARRY ENTITY CONTRACT
 
@@ -25,7 +25,7 @@ Reserved peers (host, remote-node, kube-apiserver, cluster, world) produce ONE r
 
 `BuildCilium` / `buildCNPFromPolicy` (cilium.go): renders the ENTITY form and **skips the CIDR twins when entities exist**.
 
-`resolveEntitySet` (cilium.go ~543-580): expands entity sentinels with host↔remote-node closure (host implies remote-node, remote-node implies host). E.g. kube-dns/apiserver 6443 resolves to `{host, kube-apiserver, remote-node}`.
+`resolveEntitySet` (cilium.go 549-582): expands entity sentinels with host↔remote-node closure (host implies remote-node, remote-node implies host). E.g. kube-dns/apiserver 6443 resolves to `{host, kube-apiserver, remote-node}`.
 
 World egress → `0.0.0.0/0` twin transform in builder.go: CLI's `isWorldPeer` recognizes `"world"`/`"entity:world"` so world egress emits `toEntities: [world]` + world twin.
 
@@ -51,6 +51,6 @@ The abstract `Policy` model in builder.go holds both representations; renderers 
 - Do NOT change `resolveEntitySet`'s host↔remote-node closure semantics without updating cilium_test.go expectations.
 
 ## NOTES
-- Tests: `builder_test.go` (2746 LOC, 40+ table-driven scenarios incl. `TestIsKubeAPIServerWorkload` + `TestBuild_CalicoPvtWebhook_StaysWorld`) and `cilium_test.go` (1130 LOC). Keep them table-driven with `t.Parallel()`. Source LOC: `builder.go` 1157, `cilium.go` 712. CI Go 1.25 (setup-go@v5), matching go.mod 1.25.0.
+- Tests: `builder_test.go` (3624 LOC, 40+ table-driven scenarios incl. `TestIsKubeAPIServerWorkload` + `TestBuild_CalicoPvtWebhook_StaysWorld`) and `cilium_test.go` (1313 LOC). Keep them table-driven with `t.Parallel()`. Source LOC: `builder.go` 1377, `cilium.go` 677. CI Go 1.25 (setup-go@v5), matching go.mod 1.25.0.
 - `cilium.go` uses `gopkg.in/yaml.v3` for YAML marshalling, avoiding the stdlib to support anchor output.
 - `sanitizeName` and helper string functions (`contains`, `index`, `splitN`) are local shims to avoid extra stdlib imports.

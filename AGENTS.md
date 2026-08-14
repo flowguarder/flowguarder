@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-08-04 (refreshed 2026-08-07)
+**Generated:** 2026-08-04 (refreshed 2026-08-14)
 
 ## OVERVIEW
 flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble and Calico, detects anomalies, and emits Kubernetes NetworkPolicy / CiliumNetworkPolicy YAML manifests.
@@ -8,7 +8,8 @@ flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble a
 ## STRUCTURE
 ```
 flowguarder/
-├── cmd/flowguarder/   # CLI commands and analysis pipeline (~790-992 LOC)
+├── cmd/flowguarder/   # CLI commands and analysis pipeline (~1195 LOC)
+│   ├── reports.go     # Report type validation (validateReports, 14 LOC)
 ├── pkg/
 │   ├── analyze/       # Flow classification, workload aggregation, statistics
 │   │   ├── classify.go
@@ -23,26 +24,25 @@ flowguarder/
 │   │   ├── drop.go
 │   │   ├── rare.go
 │   │   └── egw.go
-│   ├── config/        # YAML config loading & schema validation
-│   │   ├── config.go
-│   │   └── schema.go
+│   ├── config/        # YAML config loading & schema validation (config.go 492 LOC + config_test.go 1099 LOC)
 │   ├── flow/          # Canonical Flow data model + label helpers
 │   ├── ingest/        # Input sources (file, dir, stdin, gRPC)
 │   ├── parser/        # Flow-log parsers + source auto-detection
 │   │   ├── hubble/    # Hubble JSON parser (fail-fast on first parse error)
 │   │   ├── goldmane/  # Calico Goldmane gRPC API (FlowResult proto3 JSON)
 │   │   └── calico/    # Calico JSON parser (log-and-skip bad lines)
-│   ├── policy/        # Abstract model + vendor renderers (~712-2746 LOC)
+│   ├── policy/        # Abstract model + vendor renderers
 │   │   ├── builder.go # Abstract policy model + dual-carry: CIDR twins + entity sentinels
-│   │   ├── cilium.go # CiliumNetworkPolicy renderer (~712 LOC)
-│   │   ├── builder_test.go # ~2746 LOC
-│   │   └── cilium_test.go # ~1130 LOC
+	│   │   ├── cilium.go # CiliumNetworkPolicy renderer (677 LOC)
+│   │   ├── builder_test.go # 3624 LOC
+│   │   └── cilium_test.go # 1313 LOC
 │   └── report/        # Text/JSON report rendering + report data structs
 ├── testdata/          # Shared fixture files for parser tests
-├── flowlab/           # Demo dataset (hubble-flows-before.jsonl, 17MB fixture) + capture/validate tools
+├── flowlab/           # Demo dataset (hubble-flows-before.jsonl, 17MB; tracked in git since 334abec) + capture/validate tools
 │   ├── Dockerfile, kind-config.yaml, demo-pods.yaml, docker-run.sh, entrypoint.sh
 │   ├── dump-hubble/main.go, validate-hubble/main.go (ONLY other main packages in module)
 │   └── flowlab-shared/  # Empty directory
+├── cmd/flowguarder/visualize/  # Policy graph visualization: BuildGraph (model.go, 410 LOC) + RenderHTMLWithSource (render.go, 254 LOC, inlined Cytoscape.js, no CDN)
 ├── policies-calico/   # generated Calico policy artifacts (untracked)
 ├── policies-hubble/   # generated Hubble policy artifacts (untracked)
 ├── policies-hubble-cilium/  # generated Hubble+Cilium policy artifacts (untracked)
@@ -73,8 +73,9 @@ flowguarder/
 | Symbol | Type | Location | Role |
 |---|---|---|---|
 | Execute | func | cmd/flowguarder/root.go | Cobra root execution |
-| runAnalyzePipeline | func | cmd/flowguarder/common_pipeline.go (~992 LOC) | Offline analysis pipeline |
-| runLiveCommand | func | cmd/flowguarder/live.go (~311 LOC) | Live streaming pipeline |
+| runAnalyzePipeline | func | cmd/flowguarder/common_pipeline.go (~1195 LOC) | Offline analysis pipeline |
+| writeVisualizationHTML | func | cmd/flowguarder/common_pipeline.go (~438) | CLI-side viz writer used by both analyze and live pipelines; atomic temp-file+rename |
+| runLiveCommand | func | cmd/flowguarder/live.go (326 LOC) | Live streaming pipeline |
 | Flow | struct | pkg/flow/flow.go | Canonical flow record |
 | Parser | interface | pkg/parser/parser.go | Flow parser contract |
 | Parser (Goldmane) | struct | pkg/parser/goldmane/parser.go | Streaming JSON parser for Calico Goldmane FlowResult |
@@ -83,13 +84,16 @@ flowguarder/
 | ComputePatterns | func | pkg/analyze/stats.go | Pattern aggregation |
 | RunAll | func | pkg/anomaly/detect.go | Detector orchestration, fixed order |
 | Detector | interface | pkg/anomaly/anomaly.go | Anomaly detector contract |
-| Build | func | pkg/policy/builder.go (~1157 LOC) | Abstract policy model with dual-carry CIDR twins + entity sentinels |
-| BuildCilium | func | pkg/policy/cilium.go (~712 LOC) | CiliumNetworkPolicy render of entity form (skips CIDR twins) |
+| Build | func | pkg/policy/builder.go (1377 LOC) | Abstract policy model with dual-carry CIDR twins + entity sentinels |
+| BuildCilium | func | pkg/policy/cilium.go (677 LOC) | CiliumNetworkPolicy render of entity form (skips CIDR twins) |
+| BuildGraph | func | cmd/flowguarder/visualize/model.go (~183) | Builds abstract graph (Node/Edge/Graph) from []policy.Policy; pure + sorted |
+| RenderHTMLWithSource | func | cmd/flowguarder/visualize/render.go | Self-contained offline HTML (inlined Cytoscape.js + dagre, no CDN) |
 | writeCiliumYAML | func | cmd/flowguarder/common_pipeline.go | CLI-side CNP writer, used by both analyze and live pipelines |
-| resolveEntitySet | func | pkg/policy/cilium.go (~lines 543-579) | Computes entity sets; host↔remote-node closure |
-| parseWorkloadSelectorV2 | func | cmd/flowguarder/common_pipeline.go (~line 468) | Reads NetPol CIDR twins, frozen |
+| resolveEntitySet | func | pkg/policy/cilium.go (549-582) | Computes entity sets; host↔remote-node closure |
+| parseWorkloadSelectorV2 | func | cmd/flowguarder/common_pipeline.go (line 658) | Reads NetPol CIDR twins, frozen |
 | Load | func | pkg/config/config.go | Config loading |
-| common_pipeline_test | file | cmd/flowguarder/common_pipeline_test.go (1900 LOC) | Pipeline regression tests |
+| validateReports | func | cmd/flowguarder/reports.go | Report type validation |
+| common_pipeline_test | file | cmd/flowguarder/common_pipeline_test.go (2851 LOC) | Pipeline regression tests |
 | review5_test | file | cmd/flowguarder/review5_test.go (393 LOC) | Frozen review gate - DO NOT MODIFY |
 | review6_test | file | cmd/flowguarder/review6_test.go (206 LOC) | Frozen review gate - DO NOT MODIFY |
 
@@ -132,10 +136,11 @@ goreleaser release --snapshot
 ```
 
 ## NOTES
-- gopls is not installed in this environment; rely on grep/read/glob for navigation.
+- gopls is available (LSP); for quick navigation grep/read/glob still work well.
 - `.omo/` is untracked + gitignored internal orchestration state (boulder plans/notepads).
 - CI uses Go 1.25 (setup-go@v5), matching go.mod 1.25.0.
 - `pkg/analyze/analyze.go` and `pkg/report/report.go` are intentionally near-empty package declarations.
 - `policies2/` was removed in commit de4b49e ("output removal"). `policies-calico/`, `policies-hubble/`, `policies-hubble-cilium/` are untracked review artifacts.
 - New config keys: `apiserver_workload_selector` (struct: namespace+name, defaults to kube-system/kube-apiserver when present in flows) and `node_cidrs` (optional IP ranges for NetworkPolicy node rule rendering). NetworkPolicy renders node /32 IPs + optional node_cidrs, never service-range `10.96.0.0/12`.
 - Port-scan detector (`pkg/anomaly/portscan.go`) has a known dormant bug: its global `flowFlows` slice is never wired (declared nil-initialized at portscan.go:82, never assigned anywhere) — the detector is effectively a silent no-op; do not rely on it until wired.
+- Current version 1.2.1; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
