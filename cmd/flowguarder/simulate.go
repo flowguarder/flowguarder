@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flowguarder/flowguarder/cmd/flowguarder/tui"
 	"github.com/flowguarder/flowguarder/pkg/simulate"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,7 @@ var simFlags struct {
 	direction string
 	l7Name    string
 	l7Pattern string
+	useTUI    bool
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +59,26 @@ Examples:
 		// 1. Validate --policies
 		if simFlags.policies == "" {
 			return fmt.Errorf("simulate: --policies is required")
+		}
+		// 1b. Resolve and load policies early (needed for TUI mode too)
+		absDir, derr := filepath.Abs(simFlags.policies)
+		if derr != nil {
+			return fmt.Errorf("simulate: resolve policies path: %w", derr)
+		}
+		policies, loadErrs, err := simulate.LoadPolicies(absDir)
+		if err != nil {
+			return fmt.Errorf("simulate: load policies: %w", err)
+		}
+		for _, le := range loadErrs {
+			fmt.Fprintf(os.Stderr, "simulate: %s: %s\n", le.File, le.Message)
+		}
+		// 1c. TUI mode — launch UI, skip all CLI validation
+		if simFlags.useTUI {
+			if simFlags.src != "" || simFlags.dst != "" || simFlags.port != 0 {
+				fmt.Fprintf(os.Stderr, "warning: --tui ignores --src, --dst, --port flags; use the TUI to select endpoints\n")
+			}
+			objects := tui.ExtractSelectableObjects(policies)
+			return tui.Run(objects, absDir, policies)
 		}
 		// 2. Validate direction
 		outDir, err := validateDirection(simFlags.direction)
@@ -96,23 +118,11 @@ Examples:
 			traffic.L7Pattern = simFlags.l7Pattern
 		}
 		l7Traffic := newL7Traffic()
-		// 6. Load policies
-		absDir, derr := filepath.Abs(simFlags.policies)
-		if derr != nil {
-			return fmt.Errorf("simulate: resolve policies path: %w", derr)
-		}
-		policies, loadErrs, err := simulate.LoadPolicies(absDir)
-		if err != nil {
-			return fmt.Errorf("simulate: load policies: %w", err)
-		}
-		for _, le := range loadErrs {
-			fmt.Fprintf(os.Stderr, "simulate: %s: %s\n", le.File, le.Message)
-		}
-		// 7. Evaluate
+		// 6. Evaluate
 		npResult := simulate.EvaluateNetworkPolicy(src, dst, traffic, policies)
 		cnpResult := simulate.EvaluateCiliumNetworkPolicy(src, dst, traffic, policies, l7Traffic)
 		combined := combineVerdicts(npResult, cnpResult)
-		// 8. Output
+		// 7. Output
 		format := rootFlags.format
 		switch format {
 		case "json":
@@ -165,6 +175,8 @@ func init() {
 		"DNS name for L7 CiliumNetworkPolicy matching")
 	simulateCmd.Flags().StringVar(&simFlags.l7Pattern, "l7-pattern", "",
 		"DNS wildcard pattern for L7 CiliumNetworkPolicy matching")
+	simulateCmd.Flags().BoolVar(&simFlags.useTUI, "tui", false,
+		"launch interactive terminal UI for simulation")
 }
 
 // ---------------------------------------------------------------------------

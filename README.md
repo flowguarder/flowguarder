@@ -20,6 +20,7 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 - **Insight reports** — `--report` flags for top-flows, coverage, uncovered, egress-world, drops, and anomalies. Controlled via `--top-n` and `--generate-uncovered`.
 - **Policy visualization** — generates a self-contained interactive HTML graph (`flowguarder-visualization.html`) alongside the policy manifests, rendering namespaces, workloads, reserved peers and CIDRs as nodes with labeled protocol/port edges. Includes search, filtering, namespace collapse/expand, node details, and PNG/JPG export — fully offline (Cytoscape.js + dagre inlined, no CDN).
 - **Traffic simulation** — `flowguarder simulate` evaluates traffic between two endpoints against a directory of NetworkPolicy and CiliumNetworkPolicy YAML manifests, returning the effective allow/deny/undetermined verdict per direction (ingress, egress, or both) with the matching files. Fully offline: no cluster access or API connectivity required. Supports L4 (TCP/UDP/SCTP) matching and DNS L7 rules.
+- **Interactive TUI simulation** — `flowguarder simulate --tui` launches a terminal UI for picking source/destination objects from the policy directory, entering traffic parameters, and viewing verdicts interactively. Also available as `--tui-simulate` on `analyze` and `live` commands.
 - **Config-driven thresholds** — YAML config file for per-cluster customisation of CIDRs, excluded namespaces, detector thresholds, allowlists, and namespace profiles.
 - **Deterministic output** — all keys and slices are sorted; repeated runs on identical input produce identical manifests.
 
@@ -139,6 +140,7 @@ $ flowguarder analyze flows.jsonl --output ./policies --report top-flows --repor
 | `--top-n`              | Number of top entries in reports                                                                   | `10`                  |
 | `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                           | `false`               |
 | `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                     | `false`               |
+| `--tui-simulate`       | After writing policies, launch the interactive TUI simulator (requires `--output`)                 | `false`               |
 
 ### `flowguarder live`
 
@@ -153,6 +155,7 @@ $ flowguarder live --calico-file /var/log/calico/flows.json
 | ----------------- | ---------------------------------------------- | ----------------------------------------- |
 | `--hubble-server` | Hubble Relay gRPC server address (`host:port`) | (none — required if no `--calico-file`)   |
 | `--calico-file`   | Calico flow log file to tail                   | (none — required if no `--hubble-server`) |
+| `--tui-simulate`  | After writing policies, launch the interactive TUI simulator | `false`               |
 
 Inherited from the root command:
 
@@ -209,6 +212,7 @@ $ flowguarder simulate --policies ./policies --src default/frontend --dst defaul
 | `--direction`  | Direction to report: `ingress`, `egress`, `both`                                       | `both`       |
 | `--l7-name`    | DNS name for L7 CiliumNetworkPolicy matching                                           | _(none)_     |
 | `--l7-pattern` | DNS wildcard pattern for L7 CiliumNetworkPolicy matching                               | _(none)_     |
+| `--tui`        | Launch interactive TUI for picking source/destination and viewing verdicts             | `false`      |
 
 `--src-ip`/`--dst-ip` can be combined with `--src`, `--src-labels`/`--src-entity` (and destination equivalents): IP is an address used for `ipBlock`/CIDR matching, independent of the identity used for `podSelector` matching.
 
@@ -255,6 +259,27 @@ $ flowguarder simulate --policies testdata/simulate --src staging/web --dst stag
 Ingress: undetermined
 Egress: undetermined
 ```
+
+### TUI simulation
+
+Launch an interactive terminal UI for simulating traffic against loaded policies:
+
+```console
+$ flowguarder simulate --policies ./policies --tui
+```
+
+The TUI shows source and destination pickers populated with workloads, Cilium reserved entities, and CIDRs extracted from the policy directory. Select objects, enter port/protocol/L7 parameters, and view ingress/egress verdicts with matching policy files.
+
+Press `q` or `ctrl+c` to quit (exit code 0). Resizing the terminal reflows the layout automatically.
+
+After running `analyze` or `live`, the `--tui-simulate` flag writes policies to `--output` and immediately opens the simulation TUI:
+
+```console
+$ flowguarder analyze flows.jsonl --output ./policies --tui-simulate
+$ flowguarder live --hubble-server 127.0.0.1:4245 --output ./policies --tui-simulate
+```
+
+![TUI screenshot](docs/tui-screenshot.png)
 
 ---
 

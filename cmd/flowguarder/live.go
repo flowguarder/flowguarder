@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/flowguarder/flowguarder/cmd/flowguarder/tui"
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/anomaly"
 	"github.com/flowguarder/flowguarder/pkg/config"
@@ -17,8 +19,11 @@ import (
 	"github.com/flowguarder/flowguarder/pkg/ingest"
 	"github.com/flowguarder/flowguarder/pkg/parser"
 	"github.com/flowguarder/flowguarder/pkg/policy"
+	"github.com/flowguarder/flowguarder/pkg/simulate"
 	"github.com/spf13/cobra"
 )
+
+var liveTUISimulate bool
 
 // liveCmd represents the live subcommand.
 var liveCmd = &cobra.Command{
@@ -50,7 +55,23 @@ Examples:
 			// Set a default output if none specified
 			rootFlags.outputDir = "policies"
 		}
-		return runLiveCommand(cmd)
+		if err := runLiveCommand(cmd); err != nil {
+			return err
+		}
+		// Launch TUI if --tui-simulate was set
+		if liveTUISimulate {
+			absDir, err := filepath.Abs(rootFlags.outputDir)
+			if err != nil {
+				return fmt.Errorf("resolve output path: %w", err)
+			}
+			policies, _, loadErr := simulate.LoadPolicies(absDir)
+			if loadErr != nil {
+				return fmt.Errorf("load policies for TUI: %w", loadErr)
+			}
+			objects := tui.ExtractSelectableObjects(policies)
+			return tui.Run(objects, absDir, policies)
+		}
+		return nil
 	},
 }
 
@@ -66,6 +87,7 @@ func init() {
 
 	liveCmd.Flags().StringSliceVarP(&rootFlags.reports, "report", "r", nil, "report type (repeatable: top-flows, uncovered, coverage, egress-world, drops, anomalies)")
 	liveCmd.Flags().IntVar(&rootFlags.topN, "top-n", 10, "number of top items to display in reports")
+	liveCmd.Flags().BoolVar(&liveTUISimulate, "tui-simulate", false, "after analysis, launch interactive TUI for traffic simulation")
 }
 
 // runLiveCommand connects to a live flows source and runs the analysis pipeline.
