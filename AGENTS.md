@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-08-04 (refreshed 2026-08-14)
+**Generated:** 2026-08-04 (refreshed 2026-08-16)
 
 ## OVERVIEW
 flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble and Calico, detects anomalies, and emits Kubernetes NetworkPolicy / CiliumNetworkPolicy YAML manifests.
@@ -36,12 +36,10 @@ flowguarder/
 	│   │   ├── cilium.go # CiliumNetworkPolicy renderer (677 LOC)
 │   │   ├── builder_test.go # 3624 LOC
 │   │   └── cilium_test.go # 1313 LOC
-│   └── report/        # Text/JSON report rendering + report data structs
+│   ├── report/        # Text/JSON report rendering + report data structs
+│   └── simulate/      # Traffic simulation against policy manifests (loader.go, eval_np.go, eval_cnp.go, types.go + tests)
 ├── testdata/          # Shared fixture files for parser tests
-├── flowlab/           # Demo dataset (hubble-flows-before.jsonl, 17MB; tracked in git since 334abec) + capture/validate tools
-│   ├── Dockerfile, kind-config.yaml, demo-pods.yaml, docker-run.sh, entrypoint.sh
-│   ├── dump-hubble/main.go, validate-hubble/main.go (ONLY other main packages in module)
-│   └── flowlab-shared/  # Empty directory
+├── flowlab/           # Demo dataset (hubble-flows-before.jsonl, 17MB; tracked in git since 334abec) — Dockerfile, kind-config.yaml, demo-pods.yaml, docker-run.sh, entrypoint.sh; dump-hubble/main.go, validate-hubble/main.go (ONLY other main packages in module); flowlab-shared/ (empty)
 ├── cmd/flowguarder/visualize/  # Policy graph visualization: BuildGraph (model.go, 410 LOC) + RenderHTMLWithSource (render.go, 254 LOC, inlined Cytoscape.js, no CDN)
 ├── policies-calico/   # generated Calico policy artifacts (untracked)
 ├── policies-hubble/   # generated Hubble policy artifacts (untracked)
@@ -64,6 +62,8 @@ flowguarder/
 | Add live ingestion source | pkg/ingest/ |
 | Modify policy output | pkg/policy/ |
 | Change config schema | pkg/config/config.go |
+| Add/modify simulate logic | pkg/simulate/ |
+| Modify simulate CLI | cmd/flowguarder/simulate.go |
 | Add/modify report rendering | pkg/report/ |
 | Change version string | cmd/flowguarder/version.go |
 | Run tests | `make test` |
@@ -96,6 +96,9 @@ flowguarder/
 | common_pipeline_test | file | cmd/flowguarder/common_pipeline_test.go (2851 LOC) | Pipeline regression tests |
 | review5_test | file | cmd/flowguarder/review5_test.go (393 LOC) | Frozen review gate - DO NOT MODIFY |
 | review6_test | file | cmd/flowguarder/review6_test.go (206 LOC) | Frozen review gate - DO NOT MODIFY |
+| LoadPolicies | func | pkg/simulate/loader.go | Recursive YAML loader, multi-doc split, NP/CNP kind auto-detect |
+| EvaluateNetworkPolicy | func | pkg/simulate/eval_np.go | NP verdict: allow/deny/undetermined for L4 + selectors + ipBlock |
+| EvaluateCiliumNetworkPolicy | func | pkg/simulate/eval_cnp.go | CNP verdict incl. entities, toFQDNs, DNS L7 (port 53) |
 
 ## CONVENTIONS
 - Table-driven tests with `t.Parallel()` everywhere.
@@ -105,6 +108,7 @@ flowguarder/
 - Custom errors carry source: `parser.FormatError{Source, Message}`.
 - Calico parser logs-and-skips bad lines; Hubble parser fail-fast on first parse error.
 - Output writers target `io.Writer`; report package uses flat transfer structs.
+- Simulate evaluators are pure: take pre-loaded []LoadedPolicy, never do I/O; output deterministic (sorted MatchingFiles).
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not add randomness or I/O inside anomaly detectors; they must be pure.
@@ -116,8 +120,7 @@ flowguarder/
 
 ## UNIQUE STYLES
 - Source auto-detection probes first 4096 bytes for `"verdict"` (Hubble), `"action"` (Calico), or syslog priority prefix.
-- Goldmane format is proto3 JSON encoding (camelCase field names, int64 fields as strings); auto-detect probes for both "flow" and "sourceName" in the first 4096 bytes.
-- Goldmane parser populates both `Flow.Source.Labels`/`Flow.Destination.Labels` and the top-level `SourceLabels`/`DestLabels` shortcut fields, mirroring Hubble behaviour.
+- Goldmane is proto3 JSON (camelCase field names, int64 fields as strings); auto-detect probes for both "flow" and "sourceName" in first 4096 bytes; parser populates `Flow.Source.Labels`/`Flow.Destination.Labels` plus top-level `SourceLabels`/`DestLabels` shortcuts, mirroring Hubble.
 - Endpoint labels are derived from `flow.sourceLabels`/`flow.destLabels` so `analyze.ResolveWorkload` can resolve workload names by label priority.
 - Workload IDs are always `"namespace/name"`.
 - Policy generation is two-phase: abstract `Policy` model first, then vendor-specific renderer. Cilium rendering emits entity sentinels (fromEntities/toEntities) for reserved peers instead of in-cluster CIDRs; NetPol CIDR twins are kept for NetworkPolicy compatibility and skipped by the Cilium renderer.
@@ -130,9 +133,10 @@ make test     # go test ./...
 make vet      # go vet ./...
 make lint     # golangci-lint run ./... (skips if not installed)
 make clean    # rm -rf bin/
+# Simulate traffic against policies: flowguarder simulate --policies ./policies --src default/frontend --dst default/backend --port 8080
 goreleaser build --single-target
 goreleaser release --snapshot
-# Release workflow (.github/workflows/release.yml): tag v* push → goreleaser-action v7 (draft release)
+# Release (.github/workflows/release.yml): tag v* push → goreleaser-action v7 (draft release)
 ```
 
 ## NOTES
@@ -141,6 +145,6 @@ goreleaser release --snapshot
 - CI uses Go 1.25 (setup-go@v5), matching go.mod 1.25.0.
 - `pkg/analyze/analyze.go` and `pkg/report/report.go` are intentionally near-empty package declarations.
 - `policies2/` was removed in commit de4b49e ("output removal"). `policies-calico/`, `policies-hubble/`, `policies-hubble-cilium/` are untracked review artifacts.
-- New config keys: `apiserver_workload_selector` (struct: namespace+name, defaults to kube-system/kube-apiserver when present in flows) and `node_cidrs` (optional IP ranges for NetworkPolicy node rule rendering). NetworkPolicy renders node /32 IPs + optional node_cidrs, never service-range `10.96.0.0/12`.
+- New config keys: `apiserver_workload_selector` (struct: ns+name, defaults to kube-system/kube-apiserver when present) + `node_cidrs` (optional IP ranges); NetworkPolicy renders node /32 + node_cidrs, never service-range `10.96.0.0/12`.
 - Port-scan detector (`pkg/anomaly/portscan.go`) has a known dormant bug: its global `flowFlows` slice is never wired (declared nil-initialized at portscan.go:82, never assigned anywhere) — the detector is effectively a silent no-op; do not rely on it until wired.
-- Current version 1.2.1; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
+- Current version 1.3.0; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.

@@ -1,0 +1,16 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deny-egress
+spec:
+  endpointSelector:
+    matchLabels:
+      app: frontend
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: unrelated
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

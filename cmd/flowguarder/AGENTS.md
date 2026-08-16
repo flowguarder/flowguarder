@@ -10,8 +10,8 @@ Go CLI entry point: Cobra command tree wired at package level, pipeline orchestr
 | `root.go` | 61 | Cobra root command, global persistent flags via `rootCmdData`, registers 3 subcommands in `init()`. Includes `--skip-visualize` persistent flag (line 50) and `Version: version` (line 16). |
 | `analyze.go` | 44 | `flowguarder analyze <path>` — offline file/directory/stdin flow analysis. |
 | `live.go` | 326 | `flowguarder live` — streaming from Hubble Relay gRPC or tailing Calico file. |
-| `version.go` | 22 | `flowguarder version` — prints version string only (default 1.2.1, ldflags-injectable via -X main.version). References `version` var (root.go:16) so `--version` and `flowguarder version` are always consistent. |
-| `version_test.go` | 45 | Tests: version command prints 1.2.1; rootCmd.Version == "1.2.1" — hardcodes "1.2.1" in TWO places. |
+| `version.go` | 22 | `flowguarder version` — prints version string only (default 1.3.0, ldflags-injectable via -X main.version). References `version` var (root.go:16) so `--version` and `flowguarder version` are always consistent. |
+| `version_test.go` | 45 | Tests: version command prints 1.3.0; rootCmd.Version == "1.3.0" — hardcodes "1.3.0" in TWO places. |
 | `reports.go` | 14 | Report type validation: `validateReports()` — single small helper, rejects unknown report names. |
 | `common_pipeline.go` | 1195 | Shared pipeline: `runAnalyzePipeline` (~92), `runLiveCommand`, `ingestDir`, `executeAnalysis`, YAML policy writer (`writePolicyYAML`/`buildNetworkPolicy`), **`writeCiliumYAML` (~422, CLI-side CiliumNetworkPolicy writer used by BOTH analyze and live pipelines)**, `writeVisualizationHTML` (~438, atomic temp-file+rename), `printTextReport` (~1071), JSON/text report printers. |
 | `common_pipeline_test.go` | 2851 | Pipeline regression tests (offline analyze, policy writing, reports). |
@@ -24,6 +24,10 @@ Go CLI entry point: Cobra command tree wired at package level, pipeline orchestr
 | `visualize/model_test.go` | 1002 | Graph model tests. |
 | `visualize/render_test.go` | 334 | Render tests. |
 | `visualize/edge_cases_test.go` | 533 | Edge-case tests. |
+| `simulate.go` | 183 | `flowguarder simulate` — Cobra command + `simFlags` struct; resolves endpoints, loads policies, runs `combineVerdicts`, delegates output. |
+| `simulate_validation.go` | 183 | Verdict logic: `buildEndpoint` constructs `Endpoint` from flags; `combineVerdicts` priority allow > deny > undetermined; OR-combines NP+CNP results; `parseLabelString` helper. |
+| `simulate_output.go` | 109 | Print formatting: `printText` / `printJSON` verdict output. |
+| `simulate_test.go` | 153 | 10 integration tests for simulate verdict logic and flag combinations. |
 
 ## WHERE TO LOOK
 | Task | File |
@@ -38,6 +42,7 @@ Go CLI entry point: Cobra command tree wired at package level, pipeline orchestr
 | Modify report output format | `common_pipeline.go` (`printTextReport`, `printJSONReport`) |
 | Change version string / output format | `version.go` (var `version` + versionCmd) |
 | Validate report type flags | `reports.go` (`validateReports`) |
+| Modify simulate verdict logic | `simulate_validation.go` (`combineVerdicts`: allow > deny > undetermined, OR-combines NP+CNP) |
 | Modify visualization graph model | `visualize/model.go` (`BuildGraph`, node kinds) |
 | Modify visualization HTML output | `visualize/render.go` + `common_pipeline.go` (`writeVisualizationHTML`) |
 
@@ -49,7 +54,7 @@ Go CLI entry point: Cobra command tree wired at package level, pipeline orchestr
 - Output goes through `cmd.Printf`, `cmd.Println` (Cobra's `*cobra.Command` IO), or `fmt.Fprintln(os.Stderr, ...)`. Never use bare `fmt.Println` for user-facing output.
 - Signal-driven cancellation in `live.go`: `signal.NotifyContext` with SIGINT/SIGTERM; all goroutines in live mode respect the context.
 - Build-time version injection uses ldflags: `-ldflags "-X main.version=..."`.
-- **Every version bump MUST update `version.go` (default string) AND `version_test.go` (hardcoded "1.2.1" assertions in TWO places).** The `Version: version` reference in `root.go` is automatic — both `--version` and `flowguarder version` stay consistent.
+- **Every version bump MUST update `version.go` (default string) AND `version_test.go` (hardcoded "1.3.0" assertions in TWO places).** The `Version: version` reference in `root.go` is automatic — both `--version` and `flowguarder version` stay consistent.
 - `writeCiliumYAML` (common_pipeline.go ~422) is the **single** CLI-side CNP writer; both `analyze` and `live` pipelines route Cilium output through it — never write CNP YAML inline in either command.
 - `writeVisualizationHTML` (common_pipeline.go ~438): atomic temp-file+rename, non-blocking on errors, `chmod 0644` (#nosec G302). Output must be deterministic (byte-identical across runs — no timestamps, no random IDs) and fully offline (inlined JS, no CDN).
 - `parseWorkloadSelectorV2` (common_pipeline.go ~line 658) reads NetPol CIDR twins and is **frozen** — do not modify its semantics.
@@ -62,5 +67,6 @@ Go CLI entry point: Cobra command tree wired at package level, pipeline orchestr
 - Do NOT add Cobra commands outside `init()` in `root.go`; keep command registration in `init()` and command var declarations in their own files.
 - Do NOT use bare `fmt.Println` for user-facing output. Use `cmd.Printf/Println` or stderr.
 - Do NOT shadow the global `rootFlags` variable from subcommand functions.
+- Do NOT run `simulate_test.go` tests with `t.Parallel()` — shared rootCmd/simFlags globals; the file uses a global snapshot/restore pattern instead.
 - Do NOT remove or alter the NetPol CIDR twins — the frozen review gates (`review5_test.go`, `review6_test.go`) assert them.
 - Do NOT modify `review5_test.go` / `review6_test.go` — they are frozen acceptance locks.

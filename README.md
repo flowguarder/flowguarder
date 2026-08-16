@@ -19,6 +19,7 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 - **NetworkPolicy + CiliumNetworkPolicy generation** — deterministic policy manifests with optional default-deny stubs, symmetric ingress/egress rules (egress flows mirrored as destination ingress rules), and kube-apiserver sentinel rules (matching TCP/6443 and related ports to the apiserver CIDR).
 - **Insight reports** — `--report` flags for top-flows, coverage, uncovered, egress-world, drops, and anomalies. Controlled via `--top-n` and `--generate-uncovered`.
 - **Policy visualization** — generates a self-contained interactive HTML graph (`flowguarder-visualization.html`) alongside the policy manifests, rendering namespaces, workloads, reserved peers and CIDRs as nodes with labeled protocol/port edges. Includes search, filtering, namespace collapse/expand, node details, and PNG/JPG export — fully offline (Cytoscape.js + dagre inlined, no CDN).
+- **Traffic simulation** — `flowguarder simulate` evaluates traffic between two endpoints against a directory of NetworkPolicy and CiliumNetworkPolicy YAML manifests, returning the effective allow/deny/undetermined verdict per direction (ingress, egress, or both) with the matching files. Fully offline: no cluster access or API connectivity required. Supports L4 (TCP/UDP/SCTP) matching and DNS L7 rules.
 - **Config-driven thresholds** — YAML config file for per-cluster customisation of CIDRs, excluded namespaces, detector thresholds, allowlists, and namespace profiles.
 - **Deterministic output** — all keys and slices are sorted; repeated runs on identical input produce identical manifests.
 
@@ -123,21 +124,21 @@ Offline analysis of flow log files, directories, or stdin (via `-`).
 $ flowguarder analyze flows.jsonl --output ./policies --report top-flows --report coverage --top-n 5
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--config` | Path to YAML config file | (none) |
-| `--source` | Flow source type: `auto`, `hubble`, `calico`, `goldmane` | `auto` |
-| `--output` | Output directory for policy YAML manifests | (none — skip writing) |
-| `--format` | Report output format: `text`, `json`, `both` | `text` |
-| `--strict` | Disable safety margins for policy generation | `false` |
-| `--default-deny` | Add deny-all stub policies | `false` |
-| `--policy-format` | Policy output format: `auto`, `np`, `cnp` (auto: Hubble → CNP, Calico/CalicoSyslog/Goldmane → NP) | `auto` |
-| `--cilium` | _(hidden, legacy alias for `--policy-format=cnp`)_ | `false` |
-| `--dry-run` | Only validate input, do not generate output | `false` |
-| `-r, --report` | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none) |
-| `--top-n` | Number of top entries in reports | `10` |
-| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`) | `false` |
-| `--skip-visualize` | Skip generating flowguarder-visualization.html | `false` |
+| Flag                   | Description                                                                                        | Default               |
+| ---------------------- | -------------------------------------------------------------------------------------------------- | --------------------- |
+| `--config`             | Path to YAML config file                                                                           | (none)                |
+| `--source`             | Flow source type: `auto`, `hubble`, `calico`, `goldmane`                                           | `auto`                |
+| `--output`             | Output directory for policy YAML manifests                                                         | (none — skip writing) |
+| `--format`             | Report output format: `text`, `json`, `both`                                                       | `text`                |
+| `--strict`             | Disable safety margins for policy generation                                                       | `false`               |
+| `--default-deny`       | Add deny-all stub policies                                                                         | `false`               |
+| `--policy-format`      | Policy output format: `auto`, `np`, `cnp` (auto: Hubble → CNP, Calico/CalicoSyslog/Goldmane → NP)  | `auto`                |
+| `--cilium`             | _(hidden, legacy alias for `--policy-format=cnp`)_                                                 | `false`               |
+| `--dry-run`            | Only validate input, do not generate output                                                        | `false`               |
+| `-r, --report`         | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none)                |
+| `--top-n`              | Number of top entries in reports                                                                   | `10`                  |
+| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                           | `false`               |
+| `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                     | `false`               |
 
 ### `flowguarder live`
 
@@ -148,28 +149,28 @@ $ flowguarder live --hubble-server 127.0.0.1:4245 --default-deny
 $ flowguarder live --calico-file /var/log/calico/flows.json
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--hubble-server` | Hubble Relay gRPC server address (`host:port`) | (none — required if no `--calico-file`) |
-| `--calico-file` | Calico flow log file to tail | (none — required if no `--hubble-server`) |
+| Flag              | Description                                    | Default                                   |
+| ----------------- | ---------------------------------------------- | ----------------------------------------- |
+| `--hubble-server` | Hubble Relay gRPC server address (`host:port`) | (none — required if no `--calico-file`)   |
+| `--calico-file`   | Calico flow log file to tail                   | (none — required if no `--hubble-server`) |
 
 Inherited from the root command:
 
-| Flag | Description | Default |
-|---|---|---|
-| `--config` | Path to YAML config file | (none) |
-| `--source` | Flow source type | `auto` |
-| `--output` | Output directory for policy YAML manifests | (none) |
-| `--format` | Report output format | `text` |
-| `--strict` | Disable safety margins | `false` |
-| `--default-deny` | Add deny-all stub policies | `false` |
-| `--policy-format` | Policy output format (`auto`, `np`, `cnp`; default `auto`) | `auto` |
-| `--cilium` | _(hidden, legacy alias for `--policy-format=cnp`)_ | `false` |
-| `--kubeconfig` | Path to kubeconfig for dry-run diff (hidden) | (none) |
-| `-r, --report` | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none) |
-| `--top-n` | Number of top entries in reports | `10` |
-| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`) | `false` |
-| `--skip-visualize` | Skip generating flowguarder-visualization.html | `false` |
+| Flag                   | Description                                                                                        | Default |
+| ---------------------- | -------------------------------------------------------------------------------------------------- | ------- |
+| `--config`             | Path to YAML config file                                                                           | (none)  |
+| `--source`             | Flow source type                                                                                   | `auto`  |
+| `--output`             | Output directory for policy YAML manifests                                                         | (none)  |
+| `--format`             | Report output format                                                                               | `text`  |
+| `--strict`             | Disable safety margins                                                                             | `false` |
+| `--default-deny`       | Add deny-all stub policies                                                                         | `false` |
+| `--policy-format`      | Policy output format (`auto`, `np`, `cnp`; default `auto`)                                         | `auto`  |
+| `--cilium`             | _(hidden, legacy alias for `--policy-format=cnp`)_                                                 | `false` |
+| `--kubeconfig`         | Path to kubeconfig for dry-run diff (hidden)                                                       | (none)  |
+| `-r, --report`         | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none)  |
+| `--top-n`              | Number of top entries in reports                                                                   | `10`    |
+| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                           | `false` |
+| `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                     | `false` |
 
 Ctrl-C or SIGTERM gracefully stops the stream.
 
@@ -182,17 +183,90 @@ $ flowguarder version
 1.0.0
 ```
 
+### `flowguarder simulate`
+
+Simulate traffic between two endpoints against a directory of NetworkPolicy and CiliumNetworkPolicy YAML manifests. Returns the effective allow/deny verdict per direction (ingress, egress, or both). Runs fully offline against local YAML manifests: no cluster access or API connectivity is required. When no policy covers the traffic in one or both directions, flowGuarder returns `undetermined`.
+
+```console
+$ flowguarder simulate --policies ./policies --src default/frontend --dst default/backend --port 8080 --protocol TCP
+```
+
+| Flag           | Description                                                                            | Default      |
+| -------------- | -------------------------------------------------------------------------------------- | ------------ |
+| `--policies`   | Directory of NetworkPolicy and CiliumNetworkPolicy YAML files _(required)_             | _(required)_ |
+| `--src`        | Source endpoint as namespace/name (e.g. `default/frontend`)                            | _(none)_     |
+| `--dst`        | Destination endpoint as namespace/name (e.g. `default/backend`)                        | _(none)_     |
+| `--src-ns`     | Source namespace (used with `--src-labels`)                                            | `default`    |
+| `--dst-ns`     | Destination namespace (used with `--dst-labels`)                                       | `default`    |
+| `--src-labels` | Source labels as comma-separated k=v pairs (e.g. `app=web,team=a`)                     | _(none)_     |
+| `--dst-labels` | Destination labels as comma-separated k=v pairs                                        | _(none)_     |
+| `--src-ip`     | Source literal IP or CIDR                                                              | _(none)_     |
+| `--dst-ip`     | Destination literal IP or CIDR                                                         | _(none)_     |
+| `--src-entity` | Source Cilium entity: `world`, `cluster`, `host`, `remote-node`, `kube-apiserver`      | _(none)_     |
+| `--dst-entity` | Destination Cilium entity: `world`, `cluster`, `host`, `remote-node`, `kube-apiserver` | _(none)_     |
+| `--port`       | L4 port _(0 = any)_                                                                    | `0`          |
+| `--protocol`   | L4 protocol: TCP, UDP, SCTP _(case-insensitive)_                                       | `TCP`        |
+| `--direction`  | Direction to report: `ingress`, `egress`, `both`                                       | `both`       |
+| `--l7-name`    | DNS name for L7 CiliumNetworkPolicy matching                                           | _(none)_     |
+| `--l7-pattern` | DNS wildcard pattern for L7 CiliumNetworkPolicy matching                               | _(none)_     |
+
+`--src-ip`/`--dst-ip` can be combined with `--src`, `--src-labels`/`--src-entity` (and destination equivalents): IP is an address used for `ipBlock`/CIDR matching, independent of the identity used for `podSelector` matching.
+
+Inherited from the root command:
+
+| Flag       | Description                                  | Default |
+| ---------- | -------------------------------------------- | ------- |
+| `--format` | Report output format: `text`, `json`, `both` | `text`  |
+
+**Examples**
+
+Simulate TCP/8080 between two workloads — both directions allowed:
+
+```console
+$ flowguarder simulate --policies testdata/simulate --src default/frontend --dst default/backend --port 8080 --protocol TCP
+=== flowGuarder Simulate ===
+Ingress: allow
+Egress: allow
+Matching files:
+  - allow-egress-cnp.yaml
+  - allow-ingress-np.yaml
+```
+
+Simulate TCP/9090 between the same workloads — denied (no allow rule matches):
+
+```console
+$ flowguarder simulate --policies testdata/simulate --src default/frontend --dst default/backend --port 9090 --protocol TCP
+=== flowGuarder Simulate ===
+Ingress: deny
+Egress: deny
+Matching files:
+  - allow-egress-cnp.yaml
+  - allow-ingress-np.yaml
+  - deny-egress-cnp.yaml
+  - deny-ingress-np.yaml
+  - dns-allow-cnp.yaml
+```
+
+Staging workloads with no matching policy — undetermined:
+
+```console
+$ flowguarder simulate --policies testdata/simulate --src staging/web --dst staging/db --port 80
+=== flowGuarder Simulate ===
+Ingress: undetermined
+Egress: undetermined
+```
+
 ---
 
 ### Choosing NetworkPolicy vs CiliumNetworkPolicy
 
 By default, flowGuarder picks the policy type automatically based on the input source:
 
-| Input source | Default output | Override with |
-|---|---|---|
-| Hubble JSON | `CiliumNetworkPolicy` (`cnp`) | `--policy-format=np` |
-| Calico JSON / CalicoSyslog | `NetworkPolicy` (`np`) | `--policy-format=cnp` |
-| Goldmane (proto3 JSON) | `NetworkPolicy` (`np`) | `--policy-format=cnp` |
+| Input source               | Default output                | Override with         |
+| -------------------------- | ----------------------------- | --------------------- |
+| Hubble JSON                | `CiliumNetworkPolicy` (`cnp`) | `--policy-format=np`  |
+| Calico JSON / CalicoSyslog | `NetworkPolicy` (`np`)        | `--policy-format=cnp` |
+| Goldmane (proto3 JSON)     | `NetworkPolicy` (`np`)        | `--policy-format=cnp` |
 
 Use `--policy-format=np` to force standard Kubernetes `NetworkPolicy` output, or `--policy-format=cnp` to force `CiliumNetworkPolicy` regardless of input source.
 
@@ -204,14 +278,14 @@ Use `--policy-format=np` to force standard Kubernetes `NetworkPolicy` output, or
 
 Reports are optional sections printed alongside the minimal summary header (flow count, workload count, policy count). Request any combination with `-r <type>`:
 
-| Report | Description |
-|---|---|
-| `top-flows` | Top flow aggregates by total bytes. Groups by (source, destination, port, protocol) and returns the top-N sorted descending. |
-| `coverage` | Policy coverage: percentage of flows and bytes covered by generated policies. |
-| `uncovered` | Flows not covered by any generated policy. Lists source/destination pairs and the ports involved. |
-| `egress-world` | Egress flows to public/external destinations (0.0.0.0/0) grouped by workload. |
-| `drops` | Dropped or denied flows, grouped and sorted by bytes. Shows the responsible policy name or drop reason. |
-| `anomalies` | All detected anomalies from the seven detector plugins, sorted by severity (high first), then workload, then type. |
+| Report         | Description                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `top-flows`    | Top flow aggregates by total bytes. Groups by (source, destination, port, protocol) and returns the top-N sorted descending. |
+| `coverage`     | Policy coverage: percentage of flows and bytes covered by generated policies.                                                |
+| `uncovered`    | Flows not covered by any generated policy. Lists source/destination pairs and the ports involved.                            |
+| `egress-world` | Egress flows to public/external destinations (0.0.0.0/0) grouped by workload.                                                |
+| `drops`        | Dropped or denied flows, grouped and sorted by bytes. Shows the responsible policy name or drop reason.                      |
+| `anomalies`    | All detected anomalies from the seven detector plugins, sorted by severity (high first), then workload, then type.           |
 
 Multiple report types can be requested in a single invocation:
 
@@ -225,15 +299,15 @@ $ flowguarder analyze flows.jsonl --report top-flows --report coverage --report 
 
 flowGuarder runs seven deterministic detectors in a fixed order. All thresholds are configurable through the YAML config.
 
-| Detector | ID | Severity | Description |
-|---|---|---|---|
-| Port scan | `port-scan` | High | Source workload contacts more distinct destination ports than `port_scan_threshold` (default: 10) within the time window (`port_scan_window_seconds`, default: 10). |
-| Dropped flow | `dropped-flow` | Medium | Traffic was dropped or denied by a policy. Groups all drop events per source workload. |
-| Namespace | `namespace` | Low-Medium | Cross-namespace traffic outside pairs declared in `allowed_namespace_pairs`. When no pairs are configured, severity is downgraded to low (informational). |
-| Public egress | `public-egress` | Medium | Egress traffic to public (non-RFC1918) IPs from workloads not covered by `public_egress_allowlist_cidrs` or `known_good_external_endpoints`. DNS (port 53) is excluded by default. |
-| TLS unknown domain | `tls-unknown-domain` | Medium | TLS or HTTP flows whose L7 SNI/Host does not match any domain in `known_good_external_endpoints`. Excludes DNS query names. |
-| Asymmetric traffic | `asymmetric-traffic` | Medium | Workload with egress bytes greatly exceeding ingress bytes (default ratio threshold: 10:1). CronJob-labeled and operator workloads are excluded. |
-| Rare flow | `rare-flow` | Low | Flow patterns with frequency below the configured percentile threshold (`rare_flow_threshold`, default: 0.001) and occurrence count under 10. Long-tail scrapers (more than 20 distinct patterns) are excluded. |
+| Detector           | ID                   | Severity   | Description                                                                                                                                                                                                     |
+| ------------------ | -------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Port scan          | `port-scan`          | High       | Source workload contacts more distinct destination ports than `port_scan_threshold` (default: 10) within the time window (`port_scan_window_seconds`, default: 10).                                             |
+| Dropped flow       | `dropped-flow`       | Medium     | Traffic was dropped or denied by a policy. Groups all drop events per source workload.                                                                                                                          |
+| Namespace          | `namespace`          | Low-Medium | Cross-namespace traffic outside pairs declared in `allowed_namespace_pairs`. When no pairs are configured, severity is downgraded to low (informational).                                                       |
+| Public egress      | `public-egress`      | Medium     | Egress traffic to public (non-RFC1918) IPs from workloads not covered by `public_egress_allowlist_cidrs` or `known_good_external_endpoints`. DNS (port 53) is excluded by default.                              |
+| TLS unknown domain | `tls-unknown-domain` | Medium     | TLS or HTTP flows whose L7 SNI/Host does not match any domain in `known_good_external_endpoints`. Excludes DNS query names.                                                                                     |
+| Asymmetric traffic | `asymmetric-traffic` | Medium     | Workload with egress bytes greatly exceeding ingress bytes (default ratio threshold: 10:1). CronJob-labeled and operator workloads are excluded.                                                                |
+| Rare flow          | `rare-flow`          | Low        | Flow patterns with frequency below the configured percentile threshold (`rare_flow_threshold`, default: 0.001) and occurrence count under 10. Long-tail scrapers (more than 20 distinct patterns) are excluded. |
 
 Anomaly IDs are deterministic SHA-256 hashes derived from the detector type, workload, and description — identical input always produces identical IDs.
 
@@ -360,27 +434,27 @@ per_namespace_profiles:
 
 ### Config key reference
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `cluster_cidrs` | `[]string (CIDRs)` | `["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fd00::/8", "100.64.0.0/10"]` | IP ranges considered internal (RFC 1918 + CGNAT + ULA). |
-| `apiserver_cidrs` | `[]string (CIDRs)` | `["10.96.0.0/12"]` | IP ranges carrying kube-apiserver traffic. |
-| `excluded_namespaces` | `[]string` | `["kube-system", "calico-system", "tigera-operator"]` | Namespaces whose flows are silently ignored. |
-| `kube_dns_ports` | `[]PortSpec` | `UDP/53, TCP/53` | Well-known Kubernetes DNS ports. |
-| `always_allow_dns` | `bool` | `true` | Synthesize an egress rule (UDP+TCP 53 to kube-dns) for every workload with at least one egress rule. |
-| `rare_flow_threshold` | `float64` | `0.001` | Percentile (0..1) below which a flow pattern is a rare-flow anomaly. |
-| `port_scan_threshold` | `int` | `10` | Number of distinct destination ports within the time window before flagging. |
-| `port_scan_window_seconds` | `int` | `10` | Time window for port-scan detection. |
-| `asymmetric_ratio` | `float64` | `10.0` | Egress/ingress byte ratio threshold. |
-| `public_egress_known_good` | `[]string` | `[]` | Domain names known-good as legitimate egress targets. |
-| `known_good_external_endpoints` | `[]string` | `[]` | FQDNs or IPs confirmed as good external egress targets. |
-| `public_egress_allowlist_cidrs` | `[]string (CIDRs)` | `[]` | Public CIDR ranges considered benign external traffic. |
-| `allowed_namespace_pairs` | `map[string][]string` | `{}` | Maps source namespace to allowed destination namespaces. |
-| `per_namespace_profiles` | `map[string]Profile` | `{}` | Per-namespace rules: `allowed_targets`, `disallowed_targets`, `required_labels`. |
-| `apiserver_ingress_ports` | `[]PortSpec` | `TCP {9443, 8443, 5443, 6443}` | Well-known ingress ports for kube-apiserver classification. |
-| `apiserver_egress_ports` | `[]PortSpec` | `TCP {6443}` | Well-known egress ports to kube-apiserver. |
-| `apiserver_workload_selector` | `struct` | `{namespace: kube-system, name: kube-apiserver}` | Identifies the workload treated as kube-apiserver for port override. Only one selector is supported; specifying more than one entry overwrites the previous value. |
-| `node_cidrs` | `[]string (CIDRs)` | `[]` | Optional IP ranges covering cluster nodes for NetworkPolicy rendering. |
-| `public_services` | `[]PublicServiceSpec` | `kube-dns (53/udp, 53/tcp), metrics-server (4443/tcp, 10250/tcp)` | Kubernetes services rendered as a single match-all **ingress** rule. Each entry has fields `namespace`, `name`, `ports`, **`egress_allow_world`** (`bool`, default `false`) — enables rendering reserved host/remote-node egress for that service as `0.0.0.0/0`, and **`egress_ports`** (`[]PortSpec`, default `[]`) — synthesizes an egress rule for outbound traffic from the service. |
+| Key                             | Type                  | Default                                                                          | Description                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | --------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cluster_cidrs`                 | `[]string (CIDRs)`    | `["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fd00::/8", "100.64.0.0/10"]` | IP ranges considered internal (RFC 1918 + CGNAT + ULA).                                                                                                                                                                                                                                                                                                                                   |
+| `apiserver_cidrs`               | `[]string (CIDRs)`    | `["10.96.0.0/12"]`                                                               | IP ranges carrying kube-apiserver traffic.                                                                                                                                                                                                                                                                                                                                                |
+| `excluded_namespaces`           | `[]string`            | `["kube-system", "calico-system", "tigera-operator"]`                            | Namespaces whose flows are silently ignored.                                                                                                                                                                                                                                                                                                                                              |
+| `kube_dns_ports`                | `[]PortSpec`          | `UDP/53, TCP/53`                                                                 | Well-known Kubernetes DNS ports.                                                                                                                                                                                                                                                                                                                                                          |
+| `always_allow_dns`              | `bool`                | `true`                                                                           | Synthesize an egress rule (UDP+TCP 53 to kube-dns) for every workload with at least one egress rule.                                                                                                                                                                                                                                                                                      |
+| `rare_flow_threshold`           | `float64`             | `0.001`                                                                          | Percentile (0..1) below which a flow pattern is a rare-flow anomaly.                                                                                                                                                                                                                                                                                                                      |
+| `port_scan_threshold`           | `int`                 | `10`                                                                             | Number of distinct destination ports within the time window before flagging.                                                                                                                                                                                                                                                                                                              |
+| `port_scan_window_seconds`      | `int`                 | `10`                                                                             | Time window for port-scan detection.                                                                                                                                                                                                                                                                                                                                                      |
+| `asymmetric_ratio`              | `float64`             | `10.0`                                                                           | Egress/ingress byte ratio threshold.                                                                                                                                                                                                                                                                                                                                                      |
+| `public_egress_known_good`      | `[]string`            | `[]`                                                                             | Domain names known-good as legitimate egress targets.                                                                                                                                                                                                                                                                                                                                     |
+| `known_good_external_endpoints` | `[]string`            | `[]`                                                                             | FQDNs or IPs confirmed as good external egress targets.                                                                                                                                                                                                                                                                                                                                   |
+| `public_egress_allowlist_cidrs` | `[]string (CIDRs)`    | `[]`                                                                             | Public CIDR ranges considered benign external traffic.                                                                                                                                                                                                                                                                                                                                    |
+| `allowed_namespace_pairs`       | `map[string][]string` | `{}`                                                                             | Maps source namespace to allowed destination namespaces.                                                                                                                                                                                                                                                                                                                                  |
+| `per_namespace_profiles`        | `map[string]Profile`  | `{}`                                                                             | Per-namespace rules: `allowed_targets`, `disallowed_targets`, `required_labels`.                                                                                                                                                                                                                                                                                                          |
+| `apiserver_ingress_ports`       | `[]PortSpec`          | `TCP {9443, 8443, 5443, 6443}`                                                   | Well-known ingress ports for kube-apiserver classification.                                                                                                                                                                                                                                                                                                                               |
+| `apiserver_egress_ports`        | `[]PortSpec`          | `TCP {6443}`                                                                     | Well-known egress ports to kube-apiserver.                                                                                                                                                                                                                                                                                                                                                |
+| `apiserver_workload_selector`   | `struct`              | `{namespace: kube-system, name: kube-apiserver}`                                 | Identifies the workload treated as kube-apiserver for port override. Only one selector is supported; specifying more than one entry overwrites the previous value.                                                                                                                                                                                                                        |
+| `node_cidrs`                    | `[]string (CIDRs)`    | `[]`                                                                             | Optional IP ranges covering cluster nodes for NetworkPolicy rendering.                                                                                                                                                                                                                                                                                                                    |
+| `public_services`               | `[]PublicServiceSpec` | `kube-dns (53/udp, 53/tcp), metrics-server (4443/tcp, 10250/tcp)`                | Kubernetes services rendered as a single match-all **ingress** rule. Each entry has fields `namespace`, `name`, `ports`, **`egress_allow_world`** (`bool`, default `false`) — enables rendering reserved host/remote-node egress for that service as `0.0.0.0/0`, and **`egress_ports`** (`[]PortSpec`, default `[]`) — synthesizes an egress rule for outbound traffic from the service. |
 
 ---
 

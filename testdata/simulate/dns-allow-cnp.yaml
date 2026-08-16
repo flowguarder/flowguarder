@@ -1,0 +1,18 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: dns-allow
+spec:
+  endpointSelector:
+    matchLabels:
+      app: frontend
+  egress:
+    - toFQDNs:
+        - matchName: example.com
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchName: example.com

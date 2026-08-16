@@ -53,6 +53,12 @@ linters:
       - linters:
           - gosec
         text: "Expect WriteFile permissions"
+      # G703: test fixtures write into t.TempDir() using table-driven
+      # filenames; the temp dir is controlled, not attacker-tainted.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "Path traversal"
       # G104: test-only unhandled errors (tmp.Close, w.Close, os.WriteFile).
       - path: _test\.go
         linters:
