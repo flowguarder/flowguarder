@@ -20,7 +20,7 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 - **Insight reports** — `--report` flags for top-flows, coverage, uncovered, egress-world, drops, and anomalies. Controlled via `--top-n` and `--generate-uncovered`.
 - **Policy visualization** — generates a self-contained interactive HTML graph (`flowguarder-visualization.html`) alongside the policy manifests, rendering namespaces, workloads, reserved peers and CIDRs as nodes with labeled protocol/port edges. Includes search, filtering, namespace collapse/expand, node details, and PNG/JPG export — fully offline (Cytoscape.js + dagre inlined, no CDN).
 - **Traffic simulation** — `flowguarder simulate` evaluates traffic between two endpoints against a directory of NetworkPolicy and CiliumNetworkPolicy YAML manifests, returning the effective allow/deny/undetermined verdict per direction (ingress, egress, or both) with the matching files. Fully offline: no cluster access or API connectivity required. Supports L4 (TCP/UDP/SCTP) matching and DNS L7 rules.
-- **Interactive TUI simulation** — `flowguarder simulate --tui` launches a terminal UI for picking source/destination objects from the policy directory, entering traffic parameters, and viewing verdicts interactively. Also available as `--tui-simulate` on `analyze` and `live` commands.
+- **Interactive TUI** — `flowguarder tui` opens a full-screen terminal UI with three tabs: **Analyze** (pick flow source, configure options, run), **Live** (configure Hubble/Calico streaming), and **Simulate** (pick policies and endpoints, evaluate traffic). Includes a scrollable options form for every CLI flag, config save/load, and an inline CLI preview of the equivalent command.
 - **Config-driven thresholds** — YAML config file for per-cluster customisation of CIDRs, excluded namespaces, detector thresholds, allowlists, and namespace profiles.
 - **Deterministic output** — all keys and slices are sorted; repeated runs on identical input produce identical manifests.
 
@@ -36,28 +36,6 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 6. **Build policies** — The abstract policy model is rendered into Kubernetes-Native `NetworkPolicy` or `CiliumNetworkPolicy` manifests.
 7. **Write manifests** — YAML files are written to the output directory, one per workload.
 8. **Print reports** — Selected report sections are printed to stdout (top-flows, coverage, drops, etc.).
-
----
-
-## Visualization
-
-When `--output` is set (and `--skip-visualize` is not used, which is the default), flowGuarder also generates a self-contained HTML visualization file named `flowguarder-visualization.html` alongside the policy YAMLs. This file renders the analyzed traffic as an interactive graph:
-
-- **Nodes** — namespaces appear as grouped containers; workloads are displayed inside their namespace; reserved peers (`world`, `cluster`, `host`, `remote-node`, `kube-apiserver`) and raw CIDRs are shown as distinct ungrouped nodes.
-- **Edges** — every traffic flow is an edge connecting source to destination, labeled with `protocol/port`. Direction (ingress/egress) is encoded by the edge colour and arrow.
-- **Interactions** — zoom and pan the graph, type to search workloads by name, and filter by namespace, protocol, port, or direction. Click any node to open a side panel with workload details and the rules that apply to it. Namespaces can be collapsed or expanded to reduce visual clutter.
-- **Export** — PNG and JPG screenshots can be exported directly from the browser.
-- **Offline** — the file is fully self-contained: Cytoscape.js and the dagre layout engine are inlined (no external CDN) — it works without any network connection.
-
-```console
-$ flowguarder analyze flows.jsonl --output ./out
-# then open out/flowguarder-visualization.html in any browser
-
-$ flowguarder live --hubble-server 127.0.0.1:4245 --output ./out
-# same output directory, visualization is generated when --output is set
-```
-
-![Visualization screenshot](docs/visualization-screenshot.png)
 
 ---
 
@@ -260,26 +238,13 @@ Ingress: undetermined
 Egress: undetermined
 ```
 
+### `flowguarder tui`
+
+Launches the unified interactive TUI covering all three workflows (Analyze, Live, Simulate). See [Interactive TUI](#interactive-tui).
+
 ### TUI simulation
 
-Launch an interactive terminal UI for simulating traffic against loaded policies:
-
-```console
-$ flowguarder simulate --policies ./policies --tui
-```
-
-The TUI shows source and destination pickers populated with workloads, Cilium reserved entities, and CIDRs extracted from the policy directory. Select objects, enter port/protocol/L7 parameters, and view ingress/egress verdicts with matching policy files.
-
-Press `q` or `ctrl+c` to quit (exit code 0). Resizing the terminal reflows the layout automatically.
-
-After running `analyze` or `live`, the `--tui-simulate` flag writes policies to `--output` and immediately opens the simulation TUI:
-
-```console
-$ flowguarder analyze flows.jsonl --output ./policies --tui-simulate
-$ flowguarder live --hubble-server 127.0.0.1:4245 --output ./policies --tui-simulate
-```
-
-![TUI screenshot](docs/tui-screenshot.png)
+Traffic simulation is also available interactively as the **Simulate** tab of the unified TUI — see [Interactive TUI](#interactive-tui). The tab lets you pick a policy directory, choose source/destination endpoints, enter port/protocol/L7 parameters, and view ingress/egress verdicts with matching policy files.
 
 ---
 
@@ -296,6 +261,42 @@ By default, flowGuarder picks the policy type automatically based on the input s
 Use `--policy-format=np` to force standard Kubernetes `NetworkPolicy` output, or `--policy-format=cnp` to force `CiliumNetworkPolicy` regardless of input source.
 
 > **Cilium note:** When running Cilium *with its default policy engine* (not `policy-cidr-match-mode: nodes`), generating `NetworkPolicy` manifests is **not effective** for host, remote-node, and kube-apiserver egress. Standard `NetworkPolicy` cannot address those peers. Similarly, the `egress_allow_world` expansion (reserved host / remote-node peers rendered as `0.0.0.0/0`) only works on vanilla CNI defaults or on Cilium when `policy-cidr-match-mode: nodes` is configured. On a Cilium-default cluster, use `--policy-format=cnp` (the default for Hubble input) or the legacy `--cilium` flag to get proper Cilium entity-sentinel output.
+
+---
+
+## Interactive TUI
+
+![TUI screenshot](docs/tui-screenshot.png)
+
+`flowguarder tui` opens a full-screen terminal UI with three tabs:
+
+- **Analyze** — pick a flow source file or directory, configure every CLI option in a scrollable form, and run the analysis pipeline.
+- **Live** — configure a Hubble Relay or Calico file source and stream flows continuously.
+- **Simulate** — pick a policy directory, choose source/destination endpoints, and evaluate traffic verdicts interactively.
+
+Switch tabs with `1`/`2`/`3` or `←`/`→`; move between areas with `Tab`. The bottom pane shows live output plus an inline preview of the equivalent CLI command, so anything done in the TUI can be reproduced in a script. Configuration entered in the Analyze and Live tabs can be saved to and loaded from `flowguarder-config.yaml`.
+
+---
+
+## Visualization
+
+When `--output` is set (and `--skip-visualize` is not used, which is the default), flowGuarder also generates a self-contained HTML visualization file named `flowguarder-visualization.html` alongside the policy YAMLs. This file renders the analyzed traffic as an interactive graph:
+
+- **Nodes** — namespaces appear as grouped containers; workloads are displayed inside their namespace; reserved peers (`world`, `cluster`, `host`, `remote-node`, `kube-apiserver`) and raw CIDRs are shown as distinct ungrouped nodes.
+- **Edges** — every traffic flow is an edge connecting source to destination, labeled with `protocol/port`. Direction (ingress/egress) is encoded by the edge colour and arrow.
+- **Interactions** — zoom and pan the graph, type to search workloads by name, and filter by namespace, protocol, port, or direction. Click any node to open a side panel with workload details and the rules that apply to it. Namespaces can be collapsed or expanded to reduce visual clutter.
+- **Export** — PNG and JPG screenshots can be exported directly from the browser.
+- **Offline** — the file is fully self-contained: Cytoscape.js and the dagre layout engine are inlined (no external CDN) — it works without any network connection.
+
+```console
+$ flowguarder analyze flows.jsonl --output ./out
+# then open out/flowguarder-visualization.html in any browser
+
+$ flowguarder live --hubble-server 127.0.0.1:4245 --output ./out
+# same output directory, visualization is generated when --output is set
+```
+
+![Visualization screenshot](docs/visualization-screenshot.png)
 
 ---
 
