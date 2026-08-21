@@ -59,4 +59,5 @@ func init() {
 	rootCmd.AddCommand(liveCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(simulateCmd)
+	rootCmd.AddCommand(tuiCmd)
 }

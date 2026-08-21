@@ -4,7 +4,7 @@ import "github.com/spf13/cobra"
 
 // Build-time variables injected via goreleaser ldflags.
 var (
-	version = "1.3.1"
+	version = "1.4.0"
 
 	//nolint:unused // injected via goreleaser ldflags
 	commit = "none"

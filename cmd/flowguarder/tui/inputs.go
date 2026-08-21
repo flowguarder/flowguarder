@@ -8,9 +8,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Field indices for focus management.
+// Field indices for focus management. Used only inside the Simulate tab to
+// navigate its source/destination lists and input fields.
 const (
-	focusSrc = iota
+	focusPolicyDir = iota // 0: policy directory file picker
+	focusSrc
 	focusDst
 	focusPort
 	focusProto
@@ -19,6 +21,33 @@ const (
 	focusEval  // Evaluate button (always visible)
 	focusCount // total number of focusable fields
 )
+
+// Three-layer navigation model
+//
+// The TUI separates navigation into three layers:
+//
+//  1. Tab layer — which of the three top-level tabs (Analyze, Live, Simulate)
+//     is active. Switched with left/right arrow keys (wrapping), or with the
+//     1/2/3 number keys from anywhere. The active tab lives in
+//     Model.activeTab (see model.go).
+//
+//  2. Area layer — which major area within the current tab has focus.
+//     Switched with Tab/Shift+Tab (wrapping within the tab). Areas per tab:
+//     Analyze:  picker → form → reports
+//     Live:     selector → input → button
+//     Simulate: policyDir → src → dst → inputs → eval
+//     The active area lives in Model.activeArea (see model.go).
+//
+//  3. Field layer — fine-grained focus within an area.
+//     - Simulate: the focusField_ constants above for src/dst lists and inputs.
+//     - Analyze form: up/down cycles through FormField entries.
+//     - Analyze reports: up/down cycles through report toggles and Run button.
+//     - Live: up/down cycles within the current area (selector options, input,
+//     Run button).
+//
+// focusTabBar is a sentinel documenting the "tab bar" focus layer. It is never
+// passed to setFocus; tabs are switched directly via the keys described above.
+const focusTabBar = -1
 
 // initInputs initializes the text input fields.
 func (m *Model) initInputs() {
@@ -53,13 +82,18 @@ func (m *Model) setFocus(f int) {
 	}
 	m.focusField_ = f
 
-	// When focus moves to a list, position its cursor at the first item to
-	// give visible highlight feedback.
+	// When focus moves to a list, position its cursor at the first item
+	// ONLY if no item is currently selected (Index() < 0). This preserves
+	// the user's selection when Tabbing between areas.
 	if f == focusSrc && m.srcListInit && len(m.srcList.Items()) > 0 {
-		m.srcList.Select(0)
+		if m.srcList.Index() < 0 {
+			m.srcList.Select(0)
+		}
 	}
 	if f == focusDst && m.dstListInit && len(m.dstList.Items()) > 0 {
-		m.dstList.Select(0)
+		if m.dstList.Index() < 0 {
+			m.dstList.Select(0)
+		}
 	}
 
 	// Blur all text inputs
@@ -101,7 +135,9 @@ func (m Model) updateInputs(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) inputView() string {
 	var s strings.Builder
 
-	s.WriteString("\n--- Traffic Inputs ---\n")
+	s.WriteString("\n")
+	s.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("--- Traffic Inputs ---"))
+	s.WriteString("\n")
 
 	f := lipgloss.Color("63") // K8s blue focus indicator
 

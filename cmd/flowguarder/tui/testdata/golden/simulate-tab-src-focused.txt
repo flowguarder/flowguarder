@@ -1,0 +1,41 @@
+ flowGuarder   v1.4.0   │  Analyze  Live  [Simulate]                                                              ? Help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Source Pickers                                              Destination Pickers                                       
+                                                                                                                        
+default/frontend                                            default/frontend                                            
+│ app=frontend                                              │ app=frontend                                              
+                                                                                                                        
+default/backend                                             default/backend                                             
+  app=backend                                                 app=backend                                               
+                                                                                                                        
+entity:world                                                entity:world                                                
+  Cilium reserved entity                                      Cilium reserved entity                                    
+                                                                                                                        
+entity:cluster                                              entity:cluster                                              
+  Cilium reserved entity                                      Cilium reserved entity                                    
+                                                                                                                        
+entity:host                                                 entity:host                                                 
+  Cilium reserved entity                                      Cilium reserved entity                                    
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+  ••                                                          ••                                                        
+
+--- Traffic Inputs ---
+  Port: > e.g. …
+  Proto: > TCP      
+  L7 Name: > HTTP, DNS, et…
+  L7 Pattern: > regex pattern               
+    Evaluate ▶    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Output  Simulate: pick src/dst, set traffic · ctrl+o: focus output
+Select source, destination, and press Evaluate                                                                          
+Tab: cycle fields · ↑↓: navigate · Enter: select                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+$ flowguarder simulate --policies .

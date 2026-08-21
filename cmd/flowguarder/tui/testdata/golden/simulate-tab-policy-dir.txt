@@ -1,0 +1,39 @@
+ flowGuarder   v1.4.0   │  Analyze  Live  [Simulate]                                                              ? Help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> Select policy directory:
+  Policy dir: .
+> drwxr-xr-x    96B testdata
+  -rw-r--r--  3.1kB AGENTS.md
+  -rw-r--r--   11kB analyze.go
+  -rw-r--r--  5.2kB analyze_reports.go
+  -rw-r--r--  4.9kB capture_test.go
+  -rw-r--r--  5.0kB extract.go
+  -rw-r--r--   12kB extract_test.go
+  -rw-r--r--   27kB form.go
+  -rw-r--r--   10kB form_test.go
+  -rw-r--r--  7.4kB golden_test.go
+  -rw-r--r--  5.7kB inputs.go
+  -rw-r--r--  3.1kB lists.go
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Output  Simulate: pick src/dst, set traffic · ctrl+o: focus output
+Select source, destination, and press Evaluate                                                                          
+Tab: cycle fields · ↑↓: navigate · Enter: select                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+$ flowguarder simulate --policies <dir>

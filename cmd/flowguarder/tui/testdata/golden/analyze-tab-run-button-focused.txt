@@ -1,0 +1,54 @@
+ flowGuarder   v1.4.0   │  [Analyze]  Live  Simulate                                                              ? Help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Select flow source:                                         Options:                                                    
+  Source: .                                                   --output: > policies                                      
+> drwxr-xr-x    96B testdata                                  --format:                                                 
+  -rw-r--r--  3.1kB AGENTS.md                                     [x] text                                              
+  -rw-r--r--   11kB analyze.go                                    [ ] json                                              
+  -rw-r--r--  5.2kB analyze_reports.go                            [ ] both                                              
+  -rw-r--r--  4.9kB capture_test.go                           --strict: [ ]                                             
+  -rw-r--r--  5.0kB extract.go                                --default-deny: [ ]                                       
+  -rw-r--r--   12kB extract_test.go                           --policy-format:                                          
+  -rw-r--r--   27kB form.go                                       [x] auto                                              
+  -rw-r--r--   10kB form_test.go                                  [ ] np                                                
+  -rw-r--r--  7.4kB golden_test.go                                [ ] cnp                                               
+  -rw-r--r--  5.7kB inputs.go                                 --cilium: [ ]                                             
+  -rw-r--r--  3.1kB lists.go                                  --top-n: > 1                                              
+                                                              --generate-uncovered: [ ]                                 
+                                                              --skip-visualize: [ ]                                     
+  Reports:                                                    cluster_cidrs: > 10.0.0.0/8, 172.16.0.0/12,               
+      [ ] anomalies                                         192.168.0.0/16, fd00::/8, 100.64.0.0/10                     
+      [ ] coverage                                            excluded_namespaces: > kube-system, calico-system, tigera-
+      [ ] drops                                             operator                                                    
+      [ ] egress-world                                        kube_dns_ports: > UDP/53                                  
+      [ ] top-flows                                           rare_flow_threshold: > 0.001                              
+      [ ] uncovered                                           port_scan_threshold: > 1                                  
+                                                              port_scan_window_seconds: > 1                             
+                                                              asymmetric_ratio: > 1                                     
+                                                              public_egress_known_good: > docker.io, ghcr.io, gcr.io,   
+                                                            k8s.gcr.io                                                  
+                                                              known_good_external_endpoints: > pypi.org,                
+                                                            registry.npmjs.org, apt.ubuntu.com                          
+                                                              public_egress_allowlist_cidrs: >                          
+                                                              apiserver_ingress_ports: > TCP/9443                       
+                                                              apiserver_egress_ports: > TCP/6443                        
+                                                              node_cidrs: >                                             
+                                                              always_allow_dns: [ ]                                     
+                                                              allowed_namespace_pairs: (Enter to edit)                  
+                                                              per_namespace_profiles: (Enter to edit)                   
+                                                              public_services: (Enter to edit)                          
+                                                              apiserver_workload_selector: (Enter to edit)              
+                                                                                                                        
+                                                                >     ▶                                                 
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Output  Analyze: run analysis · enter: run · esc: back
+Analyze options (preview):                                                                                              
+  --cilium = false                                                                                                      
+  --default-deny = false                                                                                                
+  --format = text                                                                                                       
+  --generate-uncovered = false                                                                                          
+  --output =                                                                                                            
+  --policy-format = auto                                                                                                
+  --skip-visualize = false                                                                                              
+$ flowguarder analyze . --format text --policy-format auto

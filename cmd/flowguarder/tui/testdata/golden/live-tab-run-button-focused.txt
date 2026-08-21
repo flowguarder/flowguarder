@@ -1,0 +1,54 @@
+ flowGuarder   v1.4.0   │  Analyze  [Live]  Simulate                                                              ? Help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Select flow source:                                         Options:                                                    
+                                                              --output: > policies                                      
+  Source:                                                     --format:                                                 
+      [x] Hubble server                                           [x] text                                              
+      [ ] Calico file                                             [ ] json                                              
+                                                                  [ ] both                                              
+  Hubble server address: > host:port                          --strict: [ ]                                             
+                                                              --default-deny: [ ]                                       
+                                                              --policy-format:                                          
+                                                                  [x] auto                                              
+                                                                  [ ] np                                                
+                                                                  [ ] cnp                                               
+                                                              --cilium: [ ]                                             
+                                                              --top-n: > 1                                              
+                                                              --generate-uncovered: [ ]                                 
+                                                              --skip-visualize: [ ]                                     
+                                                              cluster_cidrs: > 10.0.0.0/8, 172.16.0.0/12,               
+                                                            192.168.0.0/16, fd00::/8, 100.64.0.0/10                     
+                                                              excluded_namespaces: > kube-system, calico-system, tigera-
+                                                            operator                                                    
+                                                              kube_dns_ports: > UDP/53                                  
+                                                              rare_flow_threshold: > 0.001                              
+                                                              port_scan_threshold: > 1                                  
+                                                              port_scan_window_seconds: > 1                             
+                                                              asymmetric_ratio: > 1                                     
+                                                              public_egress_known_good: > docker.io, ghcr.io, gcr.io,   
+                                                            k8s.gcr.io                                                  
+                                                              known_good_external_endpoints: > pypi.org,                
+                                                            registry.npmjs.org, apt.ubuntu.com                          
+                                                              public_egress_allowlist_cidrs: >                          
+                                                              apiserver_ingress_ports: > TCP/9443                       
+                                                              apiserver_egress_ports: > TCP/6443                        
+                                                              node_cidrs: >                                             
+                                                              always_allow_dns: [ ]                                     
+                                                              allowed_namespace_pairs: (Enter to edit)                  
+                                                              per_namespace_profiles: (Enter to edit)                   
+                                                              public_services: (Enter to edit)                          
+                                                              apiserver_workload_selector: (Enter to edit)              
+                                                                                                                        
+                                                                     Run ▶                                              
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Output  Live: configure source · ctrl+o: focus output
+Live options (preview):                                                                                                 
+  source = hubble                                                                                                       
+  hubble-server =                                                                                                       
+  --cilium = false                                                                                                      
+  --default-deny = false                                                                                                
+  --format = text                                                                                                       
+  --generate-uncovered = false                                                                                          
+  --output =                                                                                                            
+$ flowguarder live --hubble-server <host:port>

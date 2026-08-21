@@ -1,6 +1,6 @@
 # PARSER PACKAGE
 
-**Generated:** 2026-07-31 (refreshed 2026-08-07)
+**Generated:** 2026-07-31 (refreshed 2026-08-07, updated 2026-08-21)
 
 ## OVERVIEW
 `pkg/parser/` — flow-log parsing, source auto-detection, and registry-based parser selection for Hubble and Calico input formats.

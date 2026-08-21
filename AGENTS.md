@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-08-04 (refreshed 2026-08-16, updated 2026-08-16)
+**Generated:** 2026-08-04 (refreshed 2026-08-16, updated 2026-08-21)
 
 ## OVERVIEW
 flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble and Calico, detects anomalies, and emits Kubernetes NetworkPolicy / CiliumNetworkPolicy YAML manifests.
@@ -150,4 +150,4 @@ goreleaser release --snapshot
 - `policies2/` was removed in commit de4b49e ("output removal"). `policies-calico/`, `policies-hubble/`, `policies-hubble-cilium/` are untracked review artifacts.
 - New config keys: `apiserver_workload_selector` (struct: ns+name, defaults to kube-system/kube-apiserver when present) + `node_cidrs` (optional IP ranges); NetworkPolicy renders node /32 + node_cidrs, never service-range `10.96.0.0/12`.
 - Port-scan detector (`pkg/anomaly/portscan.go`) has a known dormant bug: its global `flowFlows` slice is never wired (declared nil-initialized at portscan.go:82, never assigned anywhere) — the detector is effectively a silent no-op; do not rely on it until wired.
-- Current version 1.3.1; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
+- Current version 1.4.0; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
