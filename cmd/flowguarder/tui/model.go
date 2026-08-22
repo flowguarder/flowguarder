@@ -81,7 +81,7 @@ type policyLoadedMsg struct {
 
 // LiveRunner executes the live pipeline and returns captured output + error.
 // Injected by the CLI layer (package main) to bridge the package boundary.
-type LiveRunner func(ctx context.Context, source LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool) (string, error)
+type LiveRunner func(ctx context.Context, source LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool, reports []string) (string, error)
 
 // AnalyzeRunner executes the analyze pipeline and returns captured output + error.
 type AnalyzeRunner func(sourcePath, outputDir, format, policyFormat string, strict, defaultDeny, cilium bool, reports []string, topN int) (string, error)
@@ -105,15 +105,16 @@ type Area int
 // Analyze tab areas.
 const (
 	AreaAnalyzePicker Area = iota
-	AreaAnalyzeForm
 	AreaAnalyzeReports
-	AreaAnalyzeRun // NEW: Run button has its own area
+	AreaAnalyzeForm
+	AreaAnalyzeRun
 )
 
 // Live tab areas.
 const (
 	AreaLiveSelector Area = iota
 	AreaLiveInput
+	AreaLiveReports
 	AreaLiveForm
 	AreaLiveButton
 )
@@ -133,7 +134,7 @@ func areaCount(t Tab) int {
 	case TabAnalyze:
 		return 4
 	case TabLive:
-		return 4
+		return 5
 	case TabSimulate:
 		return 5
 	}
@@ -330,6 +331,12 @@ func (m Model) Init() tea.Cmd {
 // Update processes messages and returns the updated model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	// Keep the persistent viewport's content in sync BEFORE key handling:
+	// renderBottomPane runs on a value copy, so without this sync the stored
+	// viewport never receives content and scroll keys have nothing to move.
+	m.outputViewport.Width = max(m.width, 1)
+	m.outputViewport.Height = m.bottomViewportHeight()
+	m.outputViewport.SetContent(m.bottomOutputContent())
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -452,7 +459,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "q":
-			if !m.isTextInputFocused() {
+			if !m.isAnyEditableFocused() {
 				m.quitting = true
 				return m, tea.Quit
 			}
@@ -466,9 +473,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cycleArea(-1)
 			return m, m.syncAreaFocus()
 		}
-		// Digit keys and left/right switch tabs, but NOT when a text input
+		// Digit keys and left/right switch tabs, but NOT when any text input
 		// is focused (so digits can be typed and left/right move the cursor).
-		if !m.isFormTextInputFocused() && !m.isTextInputFocused() {
+		if !m.isAnyEditableFocused() {
 			switch msg.String() {
 			case "1":
 				m.activeTab = TabAnalyze
@@ -648,15 +655,33 @@ func (m Model) isTextInputFocused() bool {
 // expanded YAMLField). When true, up/down keys should cycle form fields
 // rather than scroll the viewport.
 func (m Model) isFormTextInputFocused() bool {
-	f := m.analyzeTab.form.FocusedField()
-	if f == nil {
+	return formTextInputFocused(m.analyzeTab.form)
+}
+
+// isAnyEditableFocused reports whether ANY editable text input anywhere in
+// the UI currently holds focus: Analyze form fields, legacy port/proto/L7
+// fields, or the Live Hubble address field. Global typing shortcuts (digit
+// tab-switching, q-to-quit) must yield to focused inputs so their characters
+// can be entered.
+func (m Model) isAnyEditableFocused() bool {
+	return m.isFormTextInputFocused() ||
+		formTextInputFocused(m.liveTab.form) ||
+		m.isTextInputFocused() ||
+		m.liveTab.hubbleAddr.Focused()
+}
+
+// formTextInputFocused reports whether a text-entry field of the given form
+// (TextField, NumberField, PortListField, or an expanded YAMLField) holds
+// focus.
+func formTextInputFocused(f Form) bool {
+	fld := f.FocusedField()
+	if fld == nil {
 		return false
 	}
-	switch v := f.(type) {
+	switch v := fld.(type) {
 	case TextField, NumberField, PortListField:
 		return v.Focused()
 	case YAMLField:
-		// YAMLField is a text input only when expanded (not collapsed)
 		return v.Focused() && !v.collapsed
 	}
 	return false
@@ -815,13 +840,7 @@ func (m Model) renderSimulateBody() string {
 
 	// Policy-directory file picker is shown until a directory has been selected.
 	if !m.policyDirPicked {
-		f := lipgloss.Color("63") // K8s blue focus indicator
-		if m.focusField_ == focusPolicyDir {
-			b.WriteString(lipgloss.NewStyle().Foreground(f).Render("> "))
-		} else {
-			b.WriteString("  ")
-		}
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("Select policy directory:"))
+		b.WriteString(sectionTitle(m.focusField_ == focusPolicyDir, "Select policy directory:"))
 		b.WriteString("\n")
 		dir := m.policyDirPicker.CurrentDirectory
 		if dir == "" {
@@ -972,9 +991,17 @@ func (m *Model) InitModel(objects SelectableObjects, policyDir string, policies 
 	m.dstListInit = true
 	if len(m.srcList.Items()) > 0 {
 		m.srcList.Select(0)
+		if it, ok := m.srcList.Items()[0].(selectableItem); ok {
+			m.srcItem = it
+			m.srcSelected = true
+		}
 	}
 	if len(m.dstList.Items()) > 0 {
 		m.dstList.Select(0)
+		if it, ok := m.dstList.Items()[0].(selectableItem); ok {
+			m.dstItem = it
+			m.dstSelected = true
+		}
 	}
 	// When a policy directory is already known (e.g. `simulate --tui
 	// --policies`), skip the picker and focus the source list directly.
@@ -1157,10 +1184,14 @@ func (m *Model) syncAreaFocus() tea.Cmd {
 		// Blur everything first
 		m.liveTab.selector = m.liveTab.selector.Blur().(LiveSourceSelector)
 		m.liveTab.hubbleAddr = m.liveTab.hubbleAddr.Blur().(TextField)
+		m.liveTab.Reports = m.liveTab.Reports.Blur().(AnalyzeReports)
 		switch m.activeArea {
 		case AreaLiveSelector:
 			m.liveTab.focusIndex = 0
 			m.liveTab.selector = m.liveTab.selector.Focus().(LiveSourceSelector)
+		case AreaLiveReports:
+			m.liveTab.focusIndex = -1
+			m.liveTab.Reports = m.liveTab.Reports.Focus().(AnalyzeReports)
 		case AreaLiveInput:
 			m.liveTab.focusIndex = 1
 			if m.liveTab.selector.source == LiveSourceHubble {
@@ -1208,10 +1239,23 @@ func (m Model) updateLive(msg tea.Msg) (Model, tea.Cmd) {
 				return m, m.syncAreaFocus()
 			}
 			if m.activeArea == AreaLiveInput && m.liveTab.selector.source == LiveSourceHubble {
-				m.activeArea = AreaLiveForm
+				m.activeArea = AreaLiveReports
 				return m, m.syncAreaFocus()
 			}
 		}
+	}
+	// Reports section holds focus: arrows/space drive the toggle group
+	// itself (mirrors the Analyze reports routing); Tab cycles areas via the
+	// global handler, esc blurs into the options form.
+	if m.activeArea == AreaLiveReports {
+		if key, ok := msg.(tea.KeyMsg); ok && key.String() == "esc" {
+			m.liveTab.Reports = m.liveTab.Reports.Blur().(AnalyzeReports)
+			m.activeArea = AreaLiveForm
+			return m, m.syncAreaFocus()
+		}
+		updated, c := m.liveTab.Reports.Update(msg)
+		m.liveTab.Reports = updated.(AnalyzeReports)
+		return m, c
 	}
 	var cmd tea.Cmd
 	m.liveTab, cmd = m.liveTab.UpdateWithState(msg, m.liveRunning)
@@ -1220,6 +1264,8 @@ func (m Model) updateLive(msg tea.Msg) (Model, tea.Cmd) {
 	// changed by UpdateWithState / Update (e.g. "down" from Hubble text
 	// input sets focusIndex=2 inside LiveTab.Update).
 	switch m.liveTab.focusIndex {
+	case -1:
+		// Reports area owns focus; keep activeArea as-is.
 	case 0:
 		m.activeArea = AreaLiveSelector
 	case 1:
@@ -1563,7 +1609,10 @@ func (m Model) renderBottomPane() string {
 	b.WriteString(m.outputViewport.View())
 	b.WriteString("\n")
 	b.WriteString(m.renderCLIPreviewLine())
-	return b.String()
+	// Hard-clamp every line to the terminal width: a single overflowing row
+	// soft-wraps in the real terminal, growing the painted frame beyond what
+	// Bubble Tea declared and corrupting the previous frame (ghost doubles).
+	return lipgloss.NewStyle().MaxWidth(w).Render(b.String())
 }
 
 // renderBottomHeader renders the bottom-pane header line. When the output
@@ -1575,11 +1624,15 @@ func (m Model) renderBottomHeader() string {
 		Foreground(lipgloss.Color("15")).
 		Background(lipgloss.Color("63")).
 		Padding(0, 1)
-	label := labelStyle.Render("Output")
+	idleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("63"))
+	var label string
 	var hint string
 	if m.outputFocused {
+		label = labelStyle.Render("Output ▾")
 		hint = "scroll ↑/↓/PgUp/PgDn · ctrl+o: unfocus"
 	} else {
+		label = idleStyle.Render("Output")
 		hint = m.focusStatus()
 	}
 	return label + " " + hint
@@ -1709,7 +1762,7 @@ func (m Model) handleLiveRun() tea.Cmd {
 		strict := liveVals["--strict"] == "true"
 		defaultDeny := liveVals["--default-deny"] == "true"
 
-		output, err := m.liveRunner(ctx, source, address, outputDir, format, policyFormat, strict, defaultDeny)
+		output, err := m.liveRunner(ctx, source, address, outputDir, format, policyFormat, strict, defaultDeny, m.liveTab.Reports.Values())
 
 		// Write effective config YAML to the output directory on success.
 		if err == nil && outputDir != "" {
@@ -1851,6 +1904,9 @@ func buildLiveCLIPreview(m Model) string {
 			path = "<path>"
 		}
 		args = append(args, "--calico-file", path)
+	}
+	for _, r := range m.liveTab.Reports.Values() {
+		args = append(args, "--report", r)
 	}
 	return strings.Join(args, " ")
 }

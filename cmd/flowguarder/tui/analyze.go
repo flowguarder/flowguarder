@@ -73,11 +73,33 @@ func NewAnalyzeTab() AnalyzeTab {
 	}
 }
 
+// padToLines pads or truncates a string to exactly n lines by splitting on
+// "\\n" — appending empty lines when short, dropping tail lines when long.
+func padToLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		return strings.Join(lines[:n], "\n")
+	}
+	for len(lines) < n {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // renderAnalyzeBody renders the Analyze tab using a two-column layout:
 // LEFT column = file picker + reports section; RIGHT column = scrollable options form.
 func (m Model) renderAnalyzeBody() string {
+	// Sizing contract: bodyH = m.height - 6 - bvh (total = header(1)+sep(1)+body+sep(1)+bottom; bottom = 1+bvh+1; bvh = min(12,(h-14)/3), floor 3).
+	bodyH := m.height - 6 - m.bottomViewportHeight()
+	if bodyH < 5 {
+		bodyH = 5
+	}
+
+	leftWidth := m.width / 2
+	rightWidth := m.width - leftWidth
+
 	var left strings.Builder
-	left.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("Select flow source:"))
+	left.WriteString(sectionTitle(m.activeArea == AreaAnalyzePicker, "Select flow source:"))
 	left.WriteString("\n")
 	src := m.analyzeTab.picker.Path
 	if src == "" {
@@ -86,63 +108,90 @@ func (m Model) renderAnalyzeBody() string {
 	left.WriteString("  Source: ")
 	left.WriteString(src)
 	left.WriteString("\n")
+
+	// Derive the exact picker height budget from the overhead already in
+	// the builder (title + source line) and set it BEFORE rendering, so the
+	// view reflects the current frame's height (no one-frame lag).
+	overheadLines := strings.Count(left.String(), "\n") + 1
+	reportLines := strings.Count(m.renderAnalyzeReports(), "\n") + 1
+	pickerH := bodyH - overheadLines - reportLines - reportsBottomGap
+	if pickerH < 1 {
+		pickerH = 1
+	}
+	m.analyzeTab.picker.SetHeight(pickerH)
 	pickerView := m.analyzeTab.picker.View()
 	if m.analyzeTab.picker.CurrentDirectory != "/" && m.analyzeTab.picker.CurrentDirectory != "." && m.analyzeTab.pickerCursorPos == 0 {
 		lines := strings.SplitN(pickerView, "\n", 2)
 		if len(lines) > 1 {
-			left.WriteString("> ..\n")
-			line0 := stripFilePickerCursor(lines[0])
-			left.WriteString("  " + line0 + "\n")
-			left.WriteString(lines[1])
+			pickerView = "> ..\n" + "  " + stripFilePickerCursor(lines[0]) + "\n" + lines[1]
 		} else {
-			left.WriteString("> ..\n")
+			pickerView = "> ..\n"
 		}
 	} else if m.analyzeTab.picker.CurrentDirectory != "/" && m.analyzeTab.picker.CurrentDirectory != "." {
-		left.WriteString("  ..\n")
-		left.WriteString(pickerView)
-	} else {
-		left.WriteString(pickerView)
+		pickerView = "  ..\n" + pickerView
 	}
-	left.WriteString("\n\n")
-	left.WriteString(m.renderAnalyzeReports())
+	// Focus rail: a blue left border marks the focused picker without
+	// changing the line count, so the bodyH budget is unaffected.
+	if m.activeArea == AreaAnalyzePicker {
+		pickerView = lipgloss.NewStyle().
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("63")).
+			Render(pickerView)
+	}
+	left.WriteString(pickerView)
+	pinReportsLeft(&left, m.renderAnalyzeReports(),
+		strings.Count(m.renderAnalyzeReports(), "\n")+1, bodyH)
 
-	leftWidth := m.width / 2
-	rightWidth := m.width - leftWidth
-	bodyH := m.height - 5 - m.bottomViewportHeight()
-	if bodyH < 5 {
-		bodyH = 5
+	// Right column: converge the form line budget so that AFTER Width(rightWidth)
+	// soft-wrapping the column fits bodyH. Wrapping happens at render time, so
+	// overflow is measured on the wrapped column and the budget shrinks to fit.
+	rightStyle := lipgloss.NewStyle().Width(rightWidth)
+	formBudget := bodyH - 3
+	if formBudget < 3 {
+		formBudget = 3
 	}
-	pickerH := bodyH - 4
-	if pickerH < 3 {
-		pickerH = 3
-	}
-	m.analyzeTab.picker.SetHeight(pickerH)
+	var rightView string
+	for attempt := 0; attempt < 4; attempt++ {
+		m.analyzeTab.form = m.analyzeTab.form.setViewHeight(formBudget)
 
-	var right strings.Builder
-	right.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("Options:"))
-	right.WriteString("\n")
-	right.WriteString(m.analyzeTab.form.View())
+		var right strings.Builder
+		right.WriteString(sectionTitle(m.activeArea == AreaAnalyzeForm || m.activeArea == AreaAnalyzeRun, "Options:"))
+		right.WriteString("\n")
+		right.WriteString(m.analyzeTab.form.View())
 
-	// Run button at bottom of Options column (matching Live tab layout).
-	right.WriteString("\n\n")
-	runFocused := m.activeArea == AreaAnalyzeRun
-	runPrefix := "  "
-	if runFocused {
-		runPrefix = lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render("> ")
-	}
-	right.WriteString("    ")
-	right.WriteString(runPrefix)
-	if m.analyzeRunning {
-		right.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Running… ▶"))
-	} else {
-		right.WriteString(m.analyzeRunButton.View(runFocused))
-	}
-	right.WriteString("\n")
+		// Run button at bottom of Options column (matching Live tab layout).
+		right.WriteString("\n\n")
+		runFocused := m.activeArea == AreaAnalyzeRun
+		runPrefix := "  "
+		if runFocused {
+			runPrefix = lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render("> ")
+		}
+		right.WriteString("    ")
+		right.WriteString(runPrefix)
+		if m.analyzeRunning {
+			right.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Running… ▶"))
+		} else {
+			right.WriteString(m.analyzeRunButton.View(runFocused))
+		}
+		right.WriteString("\n")
 
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(leftWidth).Render(left.String()),
-		lipgloss.NewStyle().Width(rightWidth).Render(right.String()),
-	)
+		rightView = rightStyle.Render(right.String())
+		wrapped := strings.Count(rightView, "\n") + 1
+		if wrapped <= bodyH {
+			break
+		}
+		formBudget -= wrapped - bodyH
+		if formBudget < 3 {
+			formBudget = 3
+			break
+		}
+	}
+
+	// Wrap-then-pad: columns are soft-wrapped above, then padded/truncated to
+	// exactly bodyH lines so JoinHorizontal yields precisely bodyH.
+	leftView := padToLines(lipgloss.NewStyle().Width(leftWidth).Render(left.String()), bodyH)
+	rightView = padToLines(rightView, bodyH)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 }
 
 // Values returns the current analyze option values keyed by field label,
@@ -238,11 +287,10 @@ func (m Model) updateAnalyze(msg tea.Msg) (Model, tea.Cmd) {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.String() {
 			case "esc":
-				m.analyzeReports = m.analyzeReports.Blur().(AnalyzeReports)
-				if len(m.analyzeTab.form.fields) > 0 {
-					m.analyzeTab.form = m.analyzeTab.form.SetFocus(len(m.analyzeTab.form.fields) - 1)
-				}
-				return m, nil
+				// Backward in the unified column-major order: Reports is
+				// above the form, below the picker — esc returns to picker.
+				m.activeArea = AreaAnalyzePicker
+				return m, m.syncAreaFocus()
 			case "enter":
 				// Enter on Run button (when in AreaAnalyzeReports) triggers analyze run.
 				return m, m.handleAnalyzeRun()

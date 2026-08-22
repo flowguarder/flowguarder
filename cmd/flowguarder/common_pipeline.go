@@ -187,20 +187,41 @@ func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) 
 func ingestDir(cmd *cobra.Command, src *ingest.DirSource, cfg config.Config, rd *rootCmdData, sourceType parser.Source, sourcePath string) error {
 	var allFlows []flow.Flow
 
-	p, err := parser.SelectParser(sourceType, parser.SourceAuto)
-	if err != nil {
-		return fmt.Errorf("selecting parser: %w", err)
+	// Explicit source: one parser serves every file. Auto mode: each file is
+	// detected individually so mixed-format directories work and undetectable
+	// files are skipped (log-and-skip) instead of aborting the whole scan.
+	var p parser.Parser
+	if sourceType != parser.SourceAuto {
+		var err error
+		p, err = parser.SelectParser(sourceType, parser.SourceAuto)
+		if err != nil {
+			return fmt.Errorf("selecting parser: %w", err)
+		}
 	}
 
-	err = src.Iterate(context.Background(), func(filePath string) error {
+	err := src.Iterate(context.Background(), func(filePath string) error {
 		fc, err2 := os.Open(filePath)
 		if err2 != nil {
 			return err2
 		}
 		defer func() { _ = fc.Close() }()
 
+		fileParser := p
+		if fileParser == nil {
+			fileSource, derr := parser.DetectFormatFile(filePath)
+			if derr != nil || fileSource == parser.SourceUnknown || fileSource == parser.SourceAuto {
+				cmd.Printf("Warning: skipping %s: cannot detect flow format\n", filePath)
+				return nil
+			}
+			fileParser, derr = parser.SelectParser(fileSource, parser.SourceAuto)
+			if derr != nil {
+				cmd.Printf("Warning: skipping %s: %v\n", filePath, derr)
+				return nil
+			}
+		}
+
 		var fileFlows []flow.Flow
-		err2 = p.Parse(fc, func(f flow.Flow) error {
+		err2 = fileParser.Parse(fc, func(f flow.Flow) error {
 			if err2 := f.Validate(); err2 != nil {
 				return nil
 			}

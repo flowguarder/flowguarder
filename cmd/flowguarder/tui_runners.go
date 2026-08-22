@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -37,8 +38,18 @@ func tuiAnalyzeRunner(sourcePath, outputDir, format, policyFormat string, strict
 	saved := rootFlags
 	defer func() { rootFlags = saved }()
 
+	// Route the standard logger into the capture buffer: pkg/policy logs
+	// warnings (e.g. "skipping synthetic workload") to the default stderr
+	// logger, which would paint raw rows over Bubble Tea's alt-screen and
+	// corrupt the frame. Captured lines surface in the Output pane instead.
+	prevLogWriter := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevLogWriter)
+
 	rootFlags = rootCmdData{
 		configPath:        cfgPath,
+		source:            saved.source,
+		kubeconfig:        saved.kubeconfig,
 		outputDir:         outputDir,
 		format:            format,
 		strict:            strict,
@@ -58,7 +69,7 @@ func tuiAnalyzeRunner(sourcePath, outputDir, format, policyFormat string, strict
 	return buf.String(), nil
 }
 
-func tuiLiveRunner(ctx context.Context, source tui.LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool) (string, error) {
+func tuiLiveRunner(ctx context.Context, source tui.LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool, reports []string) (string, error) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{Use: "live", SilenceUsage: true, SilenceErrors: true}
 	cmd.SetOut(&buf)
@@ -73,13 +84,20 @@ func tuiLiveRunner(ctx context.Context, source tui.LiveSource, address, outputDi
 	saved := rootFlags
 	defer func() { rootFlags = saved }()
 
+	prevLogWriter := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevLogWriter)
+
 	rootFlags = rootCmdData{
 		configPath:   cfgPath,
+		source:       saved.source,
+		kubeconfig:   saved.kubeconfig,
 		outputDir:    outputDir,
 		format:       format,
 		strict:       strict,
 		defaultDeny:  defaultDeny,
 		policyFormat: policyFormat,
+		reports:      reports,
 	}
 
 	switch source {

@@ -14,7 +14,7 @@ func TestVersionCmd(t *testing.T) {
 	}{
 		{
 			name:     "version command prints only version number",
-			expected: "1.4.0\n",
+			expected: "1.4.1\n",
 		},
 	}
 
@@ -39,7 +39,7 @@ func TestVersionCmd(t *testing.T) {
 func TestRootHasVersion(t *testing.T) {
 	t.Parallel()
 
-	if rootCmd.Version != "1.4.0" {
-		t.Errorf("rootCmd.Version = %q, want %q", rootCmd.Version, "1.4.0")
+	if rootCmd.Version != "1.4.1" {
+		t.Errorf("rootCmd.Version = %q, want %q", rootCmd.Version, "1.4.1")
 	}
 }

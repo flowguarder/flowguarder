@@ -1,4 +1,4 @@
- flowGuarder   v1.4.0   │  Analyze  Live  [Simulate]                                                              ? Help
+ flowGuarder   v1.4.1   │  Analyze  Live  [Simulate]                                                              ? Help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Source Pickers                                              Destination Pickers                                       
                                                                                                                         
@@ -29,7 +29,7 @@ entity:host                                                 entity:host
     Evaluate ▶    
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Output  Simulate: pick src/dst, set traffic · ctrl+o: focus output
+Output Simulate: pick src/dst, set traffic · ctrl+o: focus output                                                       
 Select source, destination, and press Evaluate                                                                          
 Tab: cycle fields · ↑↓: navigate · Enter: select                                                                        
                                                                                                                         
@@ -38,4 +38,4 @@ Tab: cycle fields · ↑↓: navigate · Enter: select
                                                                                                                         
                                                                                                                         
                                                                                                                         
-$ flowguarder simulate --policies .
+$ flowguarder simulate --policies . --src default/frontend --dst default/frontend                                       

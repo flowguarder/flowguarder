@@ -169,10 +169,10 @@ func TestViewHeaderContainsTabs(t *testing.T) {
 }
 
 func TestViewHeaderContainsVersion(t *testing.T) {
-	m := Model{version: "1.4.0"}
+	m := Model{version: "1.4.1"}
 	view := m.View()
-	if !strings.Contains(view, "1.4.0") {
-		t.Errorf("View() missing version 1.4.0\nGot:\n%s", view)
+	if !strings.Contains(view, "1.4.1") {
+		t.Errorf("View() missing version 1.4.1\nGot:\n%s", view)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestTabCyclingFullRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTabShiftTabFromReportsReturnsToForm(t *testing.T) {
+func TestTabShiftTabFromReportsReturnsToPicker(t *testing.T) {
 	t.Parallel()
 
 	m := Model{activeTab: TabAnalyze, activeArea: AreaAnalyzeReports}
@@ -226,15 +226,15 @@ func TestTabShiftTabFromReportsReturnsToForm(t *testing.T) {
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	updated := model.(Model)
 
-	if updated.activeArea != AreaAnalyzeForm {
-		t.Errorf("activeArea = %v, want AreaAnalyzeForm", updated.activeArea)
+	if updated.activeArea != AreaAnalyzePicker {
+		t.Errorf("activeArea = %v, want AreaAnalyzePicker", updated.activeArea)
 	}
 	if updated.activeTab != TabAnalyze {
 		t.Errorf("activeTab = %v, want TabAnalyze", updated.activeTab)
 	}
 }
 
-func TestTabFromAnalyzePickerGoesToNextTab(t *testing.T) {
+func TestTabFromAnalyzePickerGoesToReports(t *testing.T) {
 	t.Parallel()
 
 	m := Model{activeTab: TabAnalyze, activeArea: AreaAnalyzePicker}
@@ -243,12 +243,12 @@ func TestTabFromAnalyzePickerGoesToNextTab(t *testing.T) {
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := model.(Model)
 
-	if updated.activeArea != AreaAnalyzeForm {
-		t.Errorf("Tab from picker: area = %v, want AreaAnalyzeForm", updated.activeArea)
+	if updated.activeArea != AreaAnalyzeReports {
+		t.Errorf("Tab from picker: area = %v, want AreaAnalyzeReports", updated.activeArea)
 	}
 }
 
-func TestTabFromAnalyzeFormToReports(t *testing.T) {
+func TestTabFromAnalyzeFormToRun(t *testing.T) {
 	t.Parallel()
 
 	m := Model{activeTab: TabAnalyze, activeArea: AreaAnalyzeForm}
@@ -262,8 +262,8 @@ func TestTabFromAnalyzeFormToReports(t *testing.T) {
 	if updated.activeTab != TabAnalyze {
 		t.Errorf("activeTab = %v, want TabAnalyze (should stay)", updated.activeTab)
 	}
-	if updated.activeArea != AreaAnalyzeReports {
-		t.Errorf("activeArea = %v, want AreaAnalyzeReports", updated.activeArea)
+	if updated.activeArea != AreaAnalyzeRun {
+		t.Errorf("activeArea = %v, want AreaAnalyzeRun", updated.activeArea)
 	}
 }
 
@@ -287,7 +287,7 @@ func TestAnalyzeFormEscReturnsToPicker(t *testing.T) {
 	}
 }
 
-func TestAnalyzeReportsEscReturnsToForm(t *testing.T) {
+func TestAnalyzeReportsEscReturnsToPicker(t *testing.T) {
 	t.Parallel()
 
 	m := Model{activeTab: TabAnalyze}
@@ -300,6 +300,9 @@ func TestAnalyzeReportsEscReturnsToForm(t *testing.T) {
 
 	if updated.analyzeReports.Focused() {
 		t.Error("reports should be blurred after esc")
+	}
+	if !updated.analyzeTab.pickerFocused {
+		t.Error("esc from reports should return to picker")
 	}
 }
 
@@ -425,7 +428,7 @@ func TestLiveFocusTransitionsViaModel(t *testing.T) {
 		t.Fatalf("initial focusIndex = %d, want 0", m.liveTab.focusIndex)
 	}
 
-	// Tab cycles areas: selector(0) → input(1) → button(2) → selector(0).
+	// Tab cycles areas in visual order: selector → input → reports → form.
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := model.(Model)
 	if updated.activeArea != AreaLiveInput {
@@ -434,8 +437,14 @@ func TestLiveFocusTransitionsViaModel(t *testing.T) {
 
 	model, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = model.(Model)
+	if updated.activeArea != AreaLiveReports {
+		t.Errorf("after tab from input: activeArea = %v, want AreaLiveReports", updated.activeArea)
+	}
+
+	model, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = model.(Model)
 	if updated.activeArea != AreaLiveForm {
-		t.Errorf("after tab from input: activeArea = %v, want AreaLiveForm", updated.activeArea)
+		t.Errorf("after tab from reports: activeArea = %v, want AreaLiveForm", updated.activeArea)
 	}
 
 	// Verify selector still responds to its own keys (up wraps to bottom).
@@ -1582,5 +1591,279 @@ func TestBottomViewportHeight(t *testing.T) {
 		if got != c.want {
 			t.Errorf("bottomViewportHeight(height=%d) = %d, want %d", c.height, got, c.want)
 		}
+	}
+}
+
+// newViewFitModel builds a fully initialized Model for the given tab at the
+// given terminal size, mirroring baseGoldenModel but parameterized.
+func newViewFitModel(w, h int, tab Tab) Model {
+	m := Model{
+		version:   "1.4.1",
+		activeTab: tab,
+		width:     w,
+		height:    h,
+	}
+	m.outputViewport = viewport.New(w, 5)
+	m.analyzeTab = NewAnalyzeTab()
+	seedFilePicker(&m.analyzeTab.picker, ".")
+	seedFilePicker(&m.policyDirPicker, ".")
+	m.analyzeReports = NewAnalyzeReports("Reports", "Select report sections")
+	m.analyzeTab.form = blurForm(m.analyzeTab.form)
+	m.analyzeTab.pickerFocused = true
+	m.initInputs()
+	m.liveTab = NewLiveTab()
+	m.InitModel(SelectableObjects{
+		Workloads: []SelectableWorkload{
+			{Namespace: "default", Name: "frontend", Labels: map[string]string{"app": "frontend"}},
+			{Namespace: "default", Name: "backend", Labels: map[string]string{"app": "backend"}},
+		},
+		Entities: []string{"world", "cluster", "host", "remote-node", "kube-apiserver"},
+		CIDRs:    []SelectableCIDR{{CIDR: "10.96.0.0/12", Desc: "service CIDR"}},
+	}, "", nil)
+	m.analyzeRunButton = NewRunButton("Run")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return updated.(Model)
+}
+
+// TestViewFitsTerminalHeight locks the sizing contract that the visual QA
+// session exposed: Bubble Tea's renderer keeps only the LAST r.height lines of
+// an oversized frame, so View() must never render more lines than the
+// terminal height — otherwise the header bar silently vanishes.
+func TestViewFitsTerminalHeight(t *testing.T) {
+	t.Parallel()
+
+	sizes := []struct{ w, h int }{
+		{80, 24}, {120, 24}, {120, 30}, {120, 40}, {120, 48}, {120, 56}, {120, 80},
+	}
+	tabs := []struct {
+		tab  Tab
+		name string
+	}{
+		{TabAnalyze, "analyze"},
+		{TabLive, "live"},
+		{TabSimulate, "simulate"},
+	}
+
+	for _, s := range sizes {
+		for _, tb := range tabs {
+			t.Run(fmt.Sprintf("%dx%d-%s", s.w, s.h, tb.name), func(t *testing.T) {
+				t.Parallel()
+
+				m := newViewFitModel(s.w, s.h, tb.tab)
+				view := m.View()
+
+				lines := strings.Count(view, "\n") + 1
+				if lines > s.h {
+					t.Errorf("View() renders %d lines > terminal height %d; renderer would drop top lines (header)", lines, s.h)
+				}
+				if !strings.Contains(view, "flowGuarder") {
+					t.Errorf("View() missing header bar")
+				}
+				// The action element sits at the bottom of its column; if any
+				// clamp trims the column tail, it disappears from View().
+				// Simulate's default state shows the policy-dir picker, so its
+				// actionable element is the picker header, not Evaluate.
+				wantAction := map[Tab]string{TabAnalyze: "Run ▶", TabLive: "Run ▶", TabSimulate: "Select policy directory"}[tb.tab]
+				if !strings.Contains(view, wantAction) {
+					t.Errorf("View() missing %q (column tail was clipped)", wantAction)
+				}
+			})
+		}
+	}
+}
+
+// TestOutputPaneScrollAndFocus locks the bottom Output pane contract: scroll
+// keys move the viewport only when focused (ctrl+o), the focused state is
+// visually marked, and no rendered line ever exceeds the terminal width
+// (a single overflowing row soft-wraps and corrupts the painted frame).
+func TestOutputPaneScrollAndFocus(t *testing.T) {
+	t.Parallel()
+
+	m := newViewFitModel(120, 40, TabAnalyze)
+	m.analyzeOutput = strings.Repeat("report line\n", 60)
+	_ = m.View()
+
+	if m.outputFocused {
+		t.Fatal("output should start unfocused")
+	}
+	upd, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = upd.(Model)
+	if !m.outputFocused {
+		t.Fatal("ctrl+o should focus output")
+	}
+	if !strings.Contains(m.renderBottomHeader(), "Output ▾") {
+		t.Error("focused Output header missing focus marker")
+	}
+
+	for i := 0; i < 5; i++ {
+		u, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = u.(Model)
+	}
+	if m.outputViewport.YOffset != 5 {
+		t.Errorf("after 5x down YOffset = %d, want 5", m.outputViewport.YOffset)
+	}
+
+	esc, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = esc.(Model)
+	if m.outputFocused {
+		t.Error("esc should unfocus output")
+	}
+	if strings.Contains(m.renderBottomHeader(), "Output ▾") {
+		t.Error("unfocused Output header still shows focus marker")
+	}
+
+	wide := newViewFitModel(120, 40, TabAnalyze)
+	wide.analyzeOutput = strings.Repeat("X", 200) + "\nshort\n"
+	for _, line := range strings.Split(wide.View(), "\n") {
+		if lw := len([]rune(line)); lw > 120 {
+			t.Errorf("View() line width %d exceeds terminal width 120", lw)
+			break
+		}
+	}
+}
+
+func TestDigitTypesIntoHubbleAddress(t *testing.T) {
+	t.Parallel()
+
+	m := Model{activeTab: TabLive, liveTab: NewLiveTab()}
+	m.liveTab.focusIndex = 1
+	m.liveTab.hubbleAddr = m.liveTab.hubbleAddr.Focus().(TextField)
+
+	updatedI, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	_ = cmd
+	updated, ok := updatedI.(Model)
+	if !ok {
+		t.Fatal("Update did not return a Model")
+	}
+	if updated.activeTab != TabLive {
+		t.Errorf("digit switched tab to %v while Hubble address focused", updated.activeTab)
+	}
+	if got := updated.liveTab.hubbleAddr.Value(); got != "1" {
+		t.Errorf("hubbleAddr.Value() = %q, want %q", got, "1")
+	}
+}
+
+func TestQTypesIntoHubbleAddress(t *testing.T) {
+	t.Parallel()
+
+	m := Model{activeTab: TabLive, liveTab: NewLiveTab()}
+	m.liveTab.focusIndex = 1
+	m.liveTab.hubbleAddr = m.liveTab.hubbleAddr.Focus().(TextField)
+
+	updatedI, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	_ = cmd
+	updated, ok := updatedI.(Model)
+	if !ok {
+		t.Fatal("Update did not return a Model")
+	}
+	if updated.quitting {
+		t.Error("q quit the app while Hubble address was focused")
+	}
+	if got := updated.liveTab.hubbleAddr.Value(); got != "q" {
+		t.Errorf("hubbleAddr.Value() = %q, want %q", got, "q")
+	}
+}
+
+func TestDigitStillSwitchesTabWithoutFocusedInput(t *testing.T) {
+	t.Parallel()
+
+	m := Model{activeTab: TabAnalyze}
+	updatedI, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	_ = cmd
+	updated, ok := updatedI.(Model)
+	if !ok {
+		t.Fatal("Update did not return a Model")
+	}
+	if updated.activeTab != TabSimulate {
+		t.Errorf("digit did not switch tab: activeTab = %v, want %v", updated.activeTab, TabSimulate)
+	}
+}
+
+func TestDigitTypesIntoLiveOptionsNumberField(t *testing.T) {
+	t.Parallel()
+
+	m := Model{activeTab: TabLive, activeArea: AreaLiveForm}
+	m.liveTab = NewLiveTab()
+	m.liveTab.focusIndex = 2
+	m.liveTab.form = m.liveTab.form.SetFocus(6) // "--top-n" NumberField
+
+	updatedI, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	updated := updatedI.(Model)
+	if updated.activeTab != TabLive {
+		t.Errorf("digit switched tab to %v while Live Options field focused", updated.activeTab)
+	}
+	if got := updated.liveTab.form.Values()["--top-n"]; got != "1" {
+		t.Errorf("--top-n = %q, want %q", got, "1")
+	}
+}
+
+func TestLiveReportsFlowToPreviewAndRunner(t *testing.T) {
+	t.Parallel()
+
+	m := Model{activeTab: TabLive, activeArea: AreaLiveReports}
+	m.liveTab = NewLiveTab()
+	m.liveTab.selector.source = LiveSourceHubble
+	m.liveTab.hubbleAddr = m.liveTab.hubbleAddr.Focus().(TextField)
+	m.liveTab.Reports = m.liveTab.Reports.Focus().(AnalyzeReports)
+
+	// Toggle the first report option via space in the reports area.
+	updatedI, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated := updatedI.(Model)
+
+	values := updated.liveTab.Reports.Values()
+	if len(values) == 0 {
+		t.Fatal("space toggle selected no report")
+	}
+	preview := buildLiveCLIPreview(updated)
+	for _, v := range values {
+		if !strings.Contains(preview, "--report "+v) {
+			t.Errorf("preview %q missing --report %s", preview, v)
+		}
+	}
+}
+
+func TestLiveDownNavigationReachesReports(t *testing.T) {
+	t.Parallel()
+
+	m := Model{activeTab: TabLive, activeArea: AreaLiveSelector}
+	m.liveTab = NewLiveTab()
+	m.liveTab.selector = m.liveTab.selector.Blur().(LiveSourceSelector)
+	m.liveTab.focusIndex = 0
+	m.liveTab.selector.cursor = 1 // Hubble row selected
+
+	step1, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s1 := step1.(Model)
+	if s1.activeArea != AreaLiveInput {
+		t.Fatalf("down from selector: activeArea = %v, want AreaLiveInput", s1.activeArea)
+	}
+	step2, _ := s1.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s2 := step2.(Model)
+	if s2.activeArea != AreaLiveReports {
+		t.Fatalf("down from input: activeArea = %v, want AreaLiveReports", s2.activeArea)
+	}
+	if !s2.liveTab.Reports.Focused() {
+		t.Fatal("reports group not focused after entering reports area")
+	}
+
+	// Arrows move the group cursor in place; the area must not change.
+	moved, _ := s2.Update(tea.KeyMsg{Type: tea.KeyDown})
+	mv := moved.(Model)
+	if mv.activeArea != AreaLiveReports {
+		t.Errorf("down inside reports changed area to %v", mv.activeArea)
+	}
+	toggled, _ := mv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	tg := toggled.(Model)
+	if len(tg.liveTab.Reports.Values()) == 0 {
+		t.Error("space did not toggle a report inside reports area")
+	}
+
+	// Esc blurs the group and hands focus to the options form.
+	esc, _ := tg.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	e := esc.(Model)
+	if e.activeArea != AreaLiveForm {
+		t.Errorf("esc from reports: activeArea = %v, want AreaLiveForm", e.activeArea)
+	}
+	if e.liveTab.Reports.Focused() {
+		t.Error("reports group still focused after esc")
 	}
 }

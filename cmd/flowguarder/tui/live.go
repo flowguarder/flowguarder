@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/filepicker"
@@ -145,8 +147,12 @@ func (s LiveSourceSelector) Blur() FormField {
 // It performs no network I/O and never validates server reachability — it is
 // purely UI state that the CLI layer consumes when the user starts a live run.
 type LiveTab struct {
-	selector        LiveSourceSelector
-	hubbleAddr      TextField
+	selector   LiveSourceSelector
+	hubbleAddr TextField
+	// Reports is the multi-select report toggle group (identical to the
+	// Analyze tab's); rendered under the source input. Its own View renders
+	// the focused/unfocused title, so no extra focus mirror is needed.
+	Reports         AnalyzeReports
 	calicoFile      filepicker.Model
 	focusIndex      int // 0 = source selector, 1 = conditional input, 2 = form, 3 = run button
 	runButton       RunButton
@@ -215,6 +221,7 @@ func NewLiveTab() LiveTab {
 		focusIndex: 0,
 		runButton:  NewRunButton("Run"),
 		form:       form,
+		Reports:    NewAnalyzeReports("Reports", "Select report sections to generate"),
 	}
 }
 
@@ -224,8 +231,67 @@ func (t LiveTab) Source() LiveSource { return t.selector.source }
 // HubbleAddress returns the current Hubble server address text.
 func (t LiveTab) HubbleAddress() string { return t.hubbleAddr.Value() }
 
-// CalicoFilePath returns the currently selected Calico file path.
-func (t LiveTab) CalicoFilePath() string { return t.calicoFile.Path }
+// CalicoFilePath returns the highlighted file when the picker cursor sits on
+// a file, so the CLI preview and the runner track navigation without requiring
+// Enter. Falls back to the Enter-selected path (browsed directory) otherwise.
+func (t LiveTab) CalicoFilePath() string {
+	if p := t.highlightedCalicoPath(); p != "" {
+		return p
+	}
+	return t.calicoFile.Path
+}
+
+// highlightedCalicoPath resolves the entry under calicoCursorPos using the
+// same ordering as bubbles filepicker (directories first, then by name).
+// calicoCursorPos advances together with the picker's internal cursor, so the
+// highlighted entry is entries[pos] directly. Returns "" when out of range,
+// on the synthetic ".." row (pos 0 in a non-root cwd), or on a directory.
+// calicoEntries returns the current directory listing in the same order as
+// bubbles filepicker: directories first, then by name.
+func (t LiveTab) calicoEntries() ([]os.DirEntry, error) {
+	dir := t.calicoFile.CurrentDirectory
+	if dir == "" {
+		return nil, os.ErrNotExist
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() == entries[j].IsDir() {
+			return entries[i].Name() < entries[j].Name()
+		}
+		return entries[i].IsDir()
+	})
+	return entries, nil
+}
+
+func (t LiveTab) calicoOnDotDot() bool {
+	d := t.calicoFile.CurrentDirectory
+	return d != "/" && d != "." && d != ""
+}
+
+func (t LiveTab) highlightedCalicoPath() string {
+	entries, err := t.calicoEntries()
+	if err != nil {
+		return ""
+	}
+	idx := t.calicoCursorPos
+	if t.calicoOnDotDot() {
+		if idx == 0 {
+			return "" // synthetic ".." row
+		}
+		idx--
+	}
+	if idx < 0 || idx >= len(entries) {
+		return ""
+	}
+	e := entries[idx]
+	if e.IsDir() {
+		return ""
+	}
+	return filepath.Join(t.calicoFile.CurrentDirectory, e.Name())
+}
 
 // Update handles navigation for the Live tab. Tab/Shift+Tab are handled by the
 // top-level Model (they switch tabs); all other keys are routed here. Enter or
@@ -278,44 +344,23 @@ func (t LiveTab) Update(msg tea.Msg) (LiveTab, tea.Cmd) {
 		updated, _ := t.hubbleAddr.Update(msg)
 		t.hubbleAddr = updated.(TextField)
 	} else {
-		// When on the synthetic ".." entry, handle navigation ourselves and
-		// prevent the Bubbles picker from moving its internal cursor. This
-		// keeps our synthetic cursor in sync: cursorPos==0 → "..", picker
-		// cursor at 0; cursorPos==1 → first file, picker cursor still at 0.
-		if t.calicoCursorPos == 0 {
-			if key, ok := msg.(tea.KeyMsg); ok {
-				switch key.String() {
-				case "down", "j", "ctrl+n":
-					t.calicoCursorPos++
-					return t, nil
-				case "up", "k", "ctrl+p", "pgup", "pgdown", "g", "K":
-					return t, nil
+		// calicoCursorPos is the single source of truth for navigation over
+		// [".."]+entries. Every movement key is owned here; the internal
+		// filepicker cursor is re-aligned step-by-step so pgup/pgdown/g/G can
+		// never diverge from the highlighted path used by preview and runner.
+		if key, ok := msg.(tea.KeyMsg); ok {
+			ks := key.String()
+			if ks == "enter" && t.calicoCursorPos == 0 && t.calicoOnDotDot() {
+				parent := filepath.Dir(t.calicoFile.CurrentDirectory)
+				if parent != t.calicoFile.CurrentDirectory {
+					t.calicoFile.CurrentDirectory = parent
+					t.calicoFile.Path = ""
+					t.calicoCursorPos = 0
+					return t, t.calicoFile.Init()
 				}
 			}
-		}
-
-		if key, ok := msg.(tea.KeyMsg); ok {
-			switch key.String() {
-			case "up", "k", "ctrl+p":
-				if t.calicoCursorPos > 0 {
-					t.calicoCursorPos--
-				}
-			case "down", "j", "ctrl+n":
-				t.calicoCursorPos++
-			case "g":
-				t.calicoCursorPos = 0
-			case "pgup", "K":
-				t.calicoCursorPos = 0
-			case "enter":
-				if t.calicoCursorPos == 0 {
-					parent := filepath.Dir(t.calicoFile.CurrentDirectory)
-					if parent != t.calicoFile.CurrentDirectory {
-						t.calicoFile.CurrentDirectory = parent
-						t.calicoFile.Path = ""
-						t.calicoCursorPos = 0
-						return t, t.calicoFile.Init()
-					}
-				}
+			if t.calicoNav(ks) {
+				return t, nil
 			}
 		}
 
@@ -326,6 +371,75 @@ func (t LiveTab) Update(msg tea.Msg) (LiveTab, tea.Cmd) {
 		}
 	}
 	return t, cmd
+}
+
+// calicoNav moves calicoCursorPos for every navigation key and keeps the
+// internal filepicker cursor aligned by forwarding exactly |delta| single
+// steps. Returns false for keys it does not own (enter, esc, ...).
+func (t *LiveTab) calicoNav(key string) bool {
+	entries, err := t.calicoEntries()
+	if err != nil {
+		return false
+	}
+	dot := 0
+	if t.calicoOnDotDot() {
+		dot = 1
+	}
+	last := len(entries) + dot - 1
+
+	page := 10
+	newPos := t.calicoCursorPos
+	switch key {
+	case "up", "k", "ctrl+p":
+		newPos--
+	case "down", "j", "ctrl+n":
+		newPos++
+	case "g", "home":
+		newPos = 0
+	case "G", "end":
+		newPos = last
+	case "K", "pgup":
+		newPos -= page
+	case "J", "pgdown":
+		newPos += page
+	default:
+		return false
+	}
+	if newPos < 0 {
+		newPos = 0
+	}
+	if newPos > last {
+		newPos = last
+	}
+
+	// Internal cursor indexes entries only (no ".." row): target = newPos-dot,
+	// clamped at 0 when landing on "..". Walk one step per emitted key.
+	target := newPos - dot
+	if target < 0 {
+		target = 0
+	}
+	cur := t.calicoCursorPos - dot
+	if cur < 0 {
+		cur = 0
+	}
+	stepDown := target >= cur
+	for cur != target {
+		var c tea.Cmd
+		k := tea.KeyMsg{Type: tea.KeyUp}
+		if stepDown {
+			k = tea.KeyMsg{Type: tea.KeyDown}
+		}
+		t.calicoFile, c = t.calicoFile.Update(k)
+		_ = c
+		if stepDown {
+			cur++
+		} else {
+			cur--
+		}
+	}
+
+	t.calicoCursorPos = newPos
+	return true
 }
 
 func (t LiveTab) renderCalicoPicker() string {
@@ -346,6 +460,13 @@ func (t LiveTab) renderCalicoPicker() string {
 		b.WriteString(pickerView)
 	} else {
 		b.WriteString(pickerView)
+	}
+	// Focus rail (line-count neutral, keeps the bodyH budget intact).
+	if t.focusIndex == 1 && t.selector.source == LiveSourceCalico {
+		return lipgloss.NewStyle().
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("63")).
+			Render(b.String())
 	}
 	return b.String()
 }
@@ -378,7 +499,8 @@ func (t LiveTab) ViewWithState(running bool, width, height int) string {
 			bottomH = 12
 		}
 	}
-	bodyH := height - 5 - bottomH
+	// Sizing contract: bodyH = height - 6 - bvh (total = header(1)+sep(1)+body+sep(1)+bottom; bottom = 1+bvh+1; bvh = min(12,(h-14)/3), floor 3).
+	bodyH := height - 6 - bottomH
 	if bodyH < 5 {
 		bodyH = 5
 	}
@@ -386,40 +508,94 @@ func (t LiveTab) ViewWithState(running bool, width, height int) string {
 	leftWidth := width / 2
 	rightWidth := width - leftWidth
 
+	reportsView := t.Reports.View()
+	reportLines := strings.Count(reportsView, "\n") + 1 // includes its own title line
+
 	var left strings.Builder
-	left.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("Select flow source:"))
+	left.WriteString(sectionTitle(t.focusIndex == 0 || (t.focusIndex == 1 && t.selector.source == LiveSourceCalico), "Select flow source:"))
 	left.WriteString("\n\n")
 	left.WriteString(t.selector.View())
 	left.WriteString("\n\n")
-	if t.selector.source == LiveSourceHubble {
+
+	// Overhead is counted with the SAME convention as renderAnalyzeBody
+	// (count("\n")+1 over everything above the widget, phantom line
+	// included), so the reports block lands on the identical row in both
+	// tabs at any terminal size.
+	overheadLines := strings.Count(left.String(), "\n") + 1
+	widgetH := bodyH - overheadLines - reportLines - reportsBottomGap
+	if widgetH < 1 {
+		widgetH = 1
+	}
+
+	switch t.selector.source {
+	case LiveSourceHubble:
 		left.WriteString(t.hubbleAddr.View())
-	} else {
+	default:
+		// Calico picker roughly fills the slot; renderCalicoPicker may add
+		// an extra "  .." line depending on position — pinReportsLeft below
+		// absorbs any difference, keeping the reports row source-independent.
+		slot := widgetH
+		d := t.calicoFile.CurrentDirectory
+		if d != "/" && d != "." && !t.calicoOnDotDot() {
+			slot--
+		}
+		if slot < 1 {
+			slot = 1
+		}
+		t.calicoFile.SetHeight(slot)
 		left.WriteString(t.renderCalicoPicker())
 	}
 
-	var right strings.Builder
-	right.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("Options:"))
-	right.WriteString("\n")
-	right.WriteString(t.form.View())
-	right.WriteString("\n\n")
+	pinReportsLeft(&left, reportsView, reportLines, bodyH)
 
-	runPrefix := "  "
-	if t.focusIndex == 3 {
-		runPrefix = focusPrefix(true)
+	// Right column: converge the form line budget so that AFTER Width(rightWidth)
+	// soft-wrapping the column fits bodyH. Wrapping happens at render time, so
+	// overflow is measured on the wrapped column and the budget shrinks to fit.
+	rightStyle := lipgloss.NewStyle().Width(rightWidth)
+	formBudget := bodyH - 3
+	if formBudget < 1 {
+		formBudget = 1
 	}
-	right.WriteString("    ")
-	right.WriteString(runPrefix)
-	if running {
-		right.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Running… ▶"))
-	} else {
-		right.WriteString(t.runButton.View(t.focusIndex == 3))
-	}
-	right.WriteString("\n")
+	var rightView string
+	for attempt := 0; attempt < 4; attempt++ {
+		t.form = t.form.setViewHeight(formBudget)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(leftWidth).Render(left.String()),
-		lipgloss.NewStyle().Width(rightWidth).Render(right.String()),
-	)
+		var right strings.Builder
+		right.WriteString(sectionTitle(t.focusIndex == 2, "Options:"))
+		right.WriteString("\n")
+		right.WriteString(t.form.View())
+		right.WriteString("\n\n")
+
+		runPrefix := "  "
+		if t.focusIndex == 3 {
+			runPrefix = focusPrefix(true)
+		}
+		right.WriteString("    ")
+		right.WriteString(runPrefix)
+		if running {
+			right.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Running… ▶"))
+		} else {
+			right.WriteString(t.runButton.View(t.focusIndex == 3))
+		}
+		right.WriteString("\n")
+
+		rightView = rightStyle.Render(right.String())
+		wrapped := strings.Count(rightView, "\n") + 1
+		if wrapped <= bodyH {
+			break
+		}
+		formBudget -= wrapped - bodyH
+		if formBudget < 1 {
+			formBudget = 1
+			break
+		}
+	}
+
+	// Wrap-then-pad: columns are soft-wrapped above, then padded/truncated to
+	// exactly bodyH lines so JoinHorizontal yields precisely bodyH.
+	leftView := padToLines(lipgloss.NewStyle().Width(leftWidth).Render(left.String()), bodyH)
+	rightView = padToLines(rightView, bodyH)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 }
 
 func (t LiveTab) UpdateWithState(msg tea.Msg, running bool) (LiveTab, tea.Cmd) {

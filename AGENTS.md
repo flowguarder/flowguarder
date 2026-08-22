@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-08-04 (refreshed 2026-08-16, updated 2026-08-21)
+**Generated:** 2026-08-04 (refreshed 2026-08-16, updated 2026-08-22)
 
 ## OVERVIEW
 flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble and Calico, detects anomalies, and emits Kubernetes NetworkPolicy / CiliumNetworkPolicy YAML manifests.
@@ -10,7 +10,8 @@ flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble a
 flowguarder/
 ├── cmd/flowguarder/   # CLI commands and analysis pipeline (~1195 LOC)
 │   ├── reports.go     # Report type validation (validateReports, 14 LOC)
-│   ├── tui/           # Interactive TUI for simulate (Bubble Tea, ~1100 LOC)
+│   ├── tui_runners.go # Glue: TUI → analyze/live pipelines (captured output, log rerouting)
+│   ├── tui/           # Unified 3-tab Bubble Tea TUI (~8000 LOC; see cmd/flowguarder/tui/AGENTS.md)
 ├── pkg/
 │   ├── analyze/       # Flow classification, workload aggregation, statistics
 │   │   ├── classify.go
@@ -65,8 +66,7 @@ flowguarder/
 | Change config schema | pkg/config/config.go |
 | Add/modify simulate logic | pkg/simulate/ |
 | Modify simulate CLI | cmd/flowguarder/simulate.go |
-| Modify TUI layout/navigation | cmd/flowguarder/tui/ (model.go View/Update, inputs.go focus) |
-| Modify TUI object extraction | cmd/flowguarder/tui/extract.go |
+| Modify TUI (any aspect) | cmd/flowguarder/tui/ — start from its AGENTS.md (nav map, forms, goldens) |
 | Add/modify report rendering | pkg/report/ |
 | Change version string | cmd/flowguarder/version.go |
 | Run tests | `make test` |
@@ -112,6 +112,8 @@ flowguarder/
 - Calico parser logs-and-skips bad lines; Hubble parser fail-fast on first parse error.
 - Output writers target `io.Writer`; report package uses flat transfer structs.
 - Simulate evaluators are pure: take pre-loaded []LoadedPolicy, never do I/O; output deterministic (sorted MatchingFiles).
+- TUI goldens regenerate via `UPDATE_GOLDEN=1 go test ./cmd/flowguarder/tui/ -run TestGoldenUISnapshots`; byte-exact except `containsOnly` models (seeded file pickers embed FS-specific sizes).
+- Lint gates come from `.golangci.yml` (errcheck, gosec, govet+shadow, staticcheck, unused); test files and `cmd/` have scoped exclusions; SA4008/SA4004 permanently excluded for the dormant portscan bug.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not add randomness or I/O inside anomaly detectors; they must be pure.
@@ -138,7 +140,7 @@ make lint     # golangci-lint run ./... (skips if not installed)
 make clean    # rm -rf bin/
 # Simulate traffic against policies: flowguarder simulate --policies ./policies --src default/frontend --dst default/backend --port 8080
 goreleaser build --single-target
-goreleaser release --snapshot
+goreleaser release --snapshot        # artifacts land in out/ (dist: out), nothing published
 # Release (.github/workflows/release.yml): tag v* push → goreleaser-action v7 (draft release)
 ```
 
@@ -150,4 +152,4 @@ goreleaser release --snapshot
 - `policies2/` was removed in commit de4b49e ("output removal"). `policies-calico/`, `policies-hubble/`, `policies-hubble-cilium/` are untracked review artifacts.
 - New config keys: `apiserver_workload_selector` (struct: ns+name, defaults to kube-system/kube-apiserver when present) + `node_cidrs` (optional IP ranges); NetworkPolicy renders node /32 + node_cidrs, never service-range `10.96.0.0/12`.
 - Port-scan detector (`pkg/anomaly/portscan.go`) has a known dormant bug: its global `flowFlows` slice is never wired (declared nil-initialized at portscan.go:82, never assigned anywhere) — the detector is effectively a silent no-op; do not rely on it until wired.
-- Current version 1.4.0; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
+- Current version 1.4.1; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.

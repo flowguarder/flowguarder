@@ -131,9 +131,8 @@ func (f AnalyzeReports) Update(msg tea.Msg) (FormField, tea.Cmd) {
 // View renders the report toggles with [x]/[ ] checkboxes.
 func (f AnalyzeReports) View() string {
 	var b strings.Builder
-	b.WriteString(focusPrefix(f.focused))
-	b.WriteString(f.label)
-	b.WriteString(":\n")
+	b.WriteString(sectionTitle(f.focused, f.label+":"))
+	b.WriteString("\n")
 
 	opts := f.sortedOptions()
 	for i, o := range opts {

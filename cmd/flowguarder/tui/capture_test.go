@@ -23,7 +23,7 @@ func TestCaptureViewOutput(t *testing.T) {
 
 	baseModel := func() Model {
 		m := Model{
-			version:         "1.4.0",
+			version:         "1.4.1",
 			activeTab:       TabAnalyze,
 			width:           120,
 			height:          40,
@@ -124,7 +124,7 @@ func assertView(t *testing.T, view string, tab Tab, hasForm bool) {
 		}
 	}
 
-	if !strings.Contains(view, "1.4.0") {
+	if !strings.Contains(view, "1.4.1") {
 		t.Errorf("View missing version string")
 	}
 

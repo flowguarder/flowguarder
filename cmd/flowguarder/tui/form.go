@@ -720,6 +720,7 @@ func (f YAMLField) Blur() FormField {
 type Form struct {
 	fields     []FormField
 	focusIndex int
+	viewHeight int // <=0 means unbounded (current behaviour); >0 clamps View() to h lines
 }
 
 // NewForm creates a Form from the given fields, focusing the first field.
@@ -806,12 +807,75 @@ func (f Form) cycleFocus(dir int) Form {
 }
 
 // View renders all fields vertically, each with its label and focus indicator.
+// If setViewHeight has been called with h>0, only the lines within that
+// budget are returned; the focused field is always fully visible in the window.
 func (f Form) View() string {
-	parts := make([]string, 0, len(f.fields))
-	for _, field := range f.fields {
-		parts = append(parts, field.View())
+	if len(f.fields) == 0 {
+		return ""
 	}
-	return strings.Join(parts, "\n")
+	// Render each field and collect per-field line ranges.
+	type fieldLines struct {
+		start, end int
+		lines      []string
+	}
+	all := make([]fieldLines, 0, len(f.fields))
+	idx := 0
+	for _, field := range f.fields {
+		raw := field.View()
+		lines := strings.Split(raw, "\n")
+		start := idx
+		idx += len(lines)
+		all = append(all, fieldLines{start: start, end: idx, lines: lines})
+	}
+	total := idx
+	vh := f.viewHeight
+	fi := f.focusIndex
+
+	// Unbounded budget: return everything.
+	if vh <= 0 || vh >= total {
+		parts := make([]string, 0, len(f.fields))
+		for _, field := range f.fields {
+			parts = append(parts, field.View())
+		}
+		return strings.Join(parts, "\n")
+	}
+
+	// Determine scroll window so the focused field is fully visible.
+	sc := 0
+	if fi >= 0 && fi < len(all) {
+		fl := all[fi]
+		// If focused field itself exceeds the budget, align to top.
+		if fl.end-fl.start <= vh {
+			if fl.start < sc {
+				sc = fl.start
+			}
+			if fl.end > sc+vh {
+				sc = fl.end - vh
+			}
+		} else {
+			sc = fl.start // show head of oversized field
+		}
+	}
+	if sc < 0 {
+		sc = 0
+	}
+	if sc+vh > total {
+		sc = total - vh
+	}
+	if sc < 0 {
+		sc = 0
+	}
+
+	chunk := make([]string, 0, vh)
+	for i := sc; i < sc+vh && i < total; i++ {
+		for _, fl := range all {
+			if i >= fl.start && i < fl.end {
+				chunk = append(chunk, fl.lines[i-fl.start])
+				break
+			}
+		}
+	}
+	return strings.Join(chunk, "\n")
 }
 
 // FocusedField returns the currently focused field (nil if the form is empty
@@ -857,6 +921,13 @@ func (f *Form) setFieldValue(label, value string) {
 			return
 		}
 	}
+}
+
+// setViewHeight sets the maximum number of lines the form may render.
+// Zero or negative means unbounded (current pre-fix behaviour).
+func (f Form) setViewHeight(h int) Form {
+	f.viewHeight = h
+	return f
 }
 
 // setFormFieldValue delegates to the concrete field type.
