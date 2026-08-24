@@ -240,7 +240,7 @@ func TestGoldenUISnapshots(t *testing.T) {
 // baseGoldenModel creates a base model configured for golden file testing.
 func baseGoldenModel() Model {
 	m := Model{
-		version:         "1.4.1",
+		version:         "1.4.2",
 		activeTab:       TabAnalyze,
 		width:           120,
 		height:          40,

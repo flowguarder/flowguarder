@@ -2742,6 +2742,21 @@ func TestVisualizeHTMLNoTimestamps(t *testing.T) {
 
 	html := string(data)
 
+	// Vendored layout libraries are go:embed'ed static assets whose minified
+	// bodies legitimately contain long numeric literals (e.g. 1000000000 in
+	// elk.bundled-0.12.0.js) that would trip the epoch heuristic below. They
+	// are byte-identical on every run (determinism guaranteed by go:embed),
+	// so excise them and assert the nondeterminism guards on flowGuarder's
+	// own output only.
+	for _, asset := range []string{
+		"visualize/assets/cytoscape.min.js",
+		"visualize/assets/elk.bundled-0.12.0.js",
+	} {
+		lib, err := os.ReadFile(asset)
+		require.NoError(t, err)
+		html = strings.ReplaceAll(html, string(lib), "")
+	}
+
 	// 1. No ISO-8601 / YYYY-MM-DD date strings.
 	dateRe := regexp.MustCompile(`\b20[0-9]{2}-[0-9]{2}-[0-9]{2}\b`)
 	assert.False(t, dateRe.MatchString(html), "HTML must not contain date strings like 2026-08-13")
@@ -2848,4 +2863,38 @@ func TestVisualizeHTMLStructure(t *testing.T) {
 	// 6. The data array key in GRAPH_DATA must have nodes and edges.
 	assert.Contains(t, html, `"nodes"`, "HTML must contain 'nodes' key in GRAPH_DATA")
 	assert.Contains(t, html, `"edges"`, "HTML must contain 'edges' key in GRAPH_DATA")
+}
+
+// TestVizSourceLabel verifies the visualization source-badge label mapping:
+// stdin marker, empty/current-directory inputs, real directories (base+"/"),
+// and file or arbitrary paths pass through per the badge rules.
+func TestVizSourceLabel(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "flows.jsonl")
+	require.NoError(t, os.WriteFile(file, []byte("{}\n"), 0600))
+
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{name: "stdin dash", src: "-", want: "stdin"},
+		{name: "dot means current directory", src: ".", want: "current directory"},
+		{name: "empty means current directory", src: "", want: "current directory"},
+		{name: "existing directory becomes base name with slash", src: dir, want: filepath.Base(dir) + "/"},
+		{name: "existing file unchanged", src: file, want: file},
+		{name: "relative file path unchanged", src: "flowlab/x.jsonl", want: "flowlab/x.jsonl"},
+		{name: "missing file path unchanged", src: "no/such/file.jsonl", want: "no/such/file.jsonl"},
+		{name: "arbitrary address unchanged", src: "127.0.0.1:4245", want: "127.0.0.1:4245"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, vizSourceLabel(tt.src))
+		})
+	}
 }

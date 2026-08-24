@@ -18,7 +18,7 @@ Output is deterministic: keys and slices are sorted, so repeated runs on the sam
 - **Anomaly detection** (7 detectors) — port-scan, rare-flow, asymmetric traffic, dropped flows, public egress, cross-namespace, TLS / unknown domain.
 - **NetworkPolicy + CiliumNetworkPolicy generation** — deterministic policy manifests with optional default-deny stubs, symmetric ingress/egress rules (egress flows mirrored as destination ingress rules), and kube-apiserver sentinel rules (matching TCP/6443 and related ports to the apiserver CIDR).
 - **Insight reports** — `--report` flags for top-flows, coverage, uncovered, egress-world, drops, and anomalies. Controlled via `--top-n` and `--generate-uncovered`.
-- **Policy visualization** — generates a self-contained interactive HTML graph (`flowguarder-visualization.html`) alongside the policy manifests, rendering namespaces, workloads, reserved peers and CIDRs as nodes with labeled protocol/port edges. Includes search, filtering, namespace collapse/expand, node details, and PNG/JPG export — fully offline (Cytoscape.js + dagre inlined, no CDN).
+- **Policy visualization** — generates a self-contained interactive HTML graph (`flowguarder-visualization.html`) alongside the policy manifests, rendering namespaces, workloads, reserved peers and CIDRs as nodes with labeled protocol/port edges. Includes search, filtering, namespace collapse/expand, node details, edge highlighting, PNG/JPG export, and selectable edge layout modes — fully offline (Cytoscape.js inlined, plus the ELK engine only for layered modes; no CDN).
 - **Traffic simulation** — `flowguarder simulate` evaluates traffic between two endpoints against a directory of NetworkPolicy and CiliumNetworkPolicy YAML manifests, returning the effective allow/deny/undetermined verdict per direction (ingress, egress, or both) with the matching files. Fully offline: no cluster access or API connectivity required. Supports L4 (TCP/UDP/SCTP) matching and DNS L7 rules.
 - **Interactive TUI** — `flowguarder tui` opens a full-screen terminal UI with three tabs: **Analyze** (pick flow source, configure options, run), **Live** (configure Hubble/Calico streaming), and **Simulate** (pick policies and endpoints, evaluate traffic). Includes a scrollable options form for every CLI flag, config save/load, and an inline CLI preview of the equivalent command.
 - **Config-driven thresholds** — YAML config file for per-cluster customisation of CIDRs, excluded namespaces, detector thresholds, allowlists, and namespace profiles.
@@ -103,22 +103,23 @@ Offline analysis of flow log files, directories, or stdin (via `-`).
 $ flowguarder analyze flows.jsonl --output ./policies --report top-flows --report coverage --top-n 5
 ```
 
-| Flag                   | Description                                                                                        | Default               |
-| ---------------------- | -------------------------------------------------------------------------------------------------- | --------------------- |
-| `--config`             | Path to YAML config file                                                                           | (none)                |
-| `--source`             | Flow source type: `auto`, `hubble`, `calico`, `goldmane`                                           | `auto`                |
-| `--output`             | Output directory for policy YAML manifests                                                         | (none — skip writing) |
-| `--format`             | Report output format: `text`, `json`, `both`                                                       | `text`                |
-| `--strict`             | Disable safety margins for policy generation                                                       | `false`               |
-| `--default-deny`       | Add deny-all stub policies                                                                         | `false`               |
-| `--policy-format`      | Policy output format: `auto`, `np`, `cnp` (auto: Hubble → CNP, Calico/CalicoSyslog/Goldmane → NP)  | `auto`                |
-| `--cilium`             | _(hidden, legacy alias for `--policy-format=cnp`)_                                                 | `false`               |
-| `--dry-run`            | Only validate input, do not generate output                                                        | `false`               |
-| `-r, --report`         | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none)                |
-| `--top-n`              | Number of top entries in reports                                                                   | `10`                  |
-| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                           | `false`               |
-| `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                     | `false`               |
-| `--tui-simulate`       | After writing policies, launch the interactive TUI simulator (requires `--output`)                 | `false`               |
+| Flag                   | Description                                                                                           | Default               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- | --------------------- |
+| `--config`             | Path to YAML config file                                                                              | (none)                |
+| `--source`             | Flow source type: `auto`, `hubble`, `calico`, `goldmane`                                              | `auto`                |
+| `--output`             | Output directory for policy YAML manifests                                                            | (none — skip writing) |
+| `--format`             | Report output format: `text`, `json`, `both`                                                          | `text`                |
+| `--strict`             | Disable safety margins for policy generation                                                          | `false`               |
+| `--default-deny`       | Add deny-all stub policies                                                                            | `false`               |
+| `--policy-format`      | Policy output format: `auto`, `np`, `cnp` (auto: Hubble → CNP, Calico/CalicoSyslog/Goldmane → NP)     | `auto`                |
+| `--cilium`             | _(hidden, legacy alias for `--policy-format=cnp`)_                                                    | `false`               |
+| `--dry-run`            | Only validate input, do not generate output                                                           | `false`               |
+| `-r, --report`         | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies`    | (none)                |
+| `--top-n`              | Number of top entries in reports                                                                      | `10`                  |
+| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                              | `false`               |
+| `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                        | `false`               |
+| `--viz-layout`         | Visualization edge layout mode: `auto`, `straight`, `orthogonal`, `curved` (auto picks by graph size) | `auto`                |
+| `--tui-simulate`       | After writing policies, launch the interactive TUI simulator (requires `--output`)                    | `false`               |
 
 ### `flowguarder live`
 
@@ -129,29 +130,30 @@ $ flowguarder live --hubble-server 127.0.0.1:4245 --default-deny
 $ flowguarder live --calico-file /var/log/calico/flows.json
 ```
 
-| Flag              | Description                                    | Default                                   |
-| ----------------- | ---------------------------------------------- | ----------------------------------------- |
-| `--hubble-server` | Hubble Relay gRPC server address (`host:port`) | (none — required if no `--calico-file`)   |
-| `--calico-file`   | Calico flow log file to tail                   | (none — required if no `--hubble-server`) |
-| `--tui-simulate`  | After writing policies, launch the interactive TUI simulator | `false`               |
+| Flag              | Description                                                  | Default                                   |
+| ----------------- | ------------------------------------------------------------ | ----------------------------------------- |
+| `--hubble-server` | Hubble Relay gRPC server address (`host:port`)               | (none — required if no `--calico-file`)   |
+| `--calico-file`   | Calico flow log file to tail                                 | (none — required if no `--hubble-server`) |
+| `--tui-simulate`  | After writing policies, launch the interactive TUI simulator | `false`                                   |
 
 Inherited from the root command:
 
-| Flag                   | Description                                                                                        | Default |
-| ---------------------- | -------------------------------------------------------------------------------------------------- | ------- |
-| `--config`             | Path to YAML config file                                                                           | (none)  |
-| `--source`             | Flow source type                                                                                   | `auto`  |
-| `--output`             | Output directory for policy YAML manifests                                                         | (none)  |
-| `--format`             | Report output format                                                                               | `text`  |
-| `--strict`             | Disable safety margins                                                                             | `false` |
-| `--default-deny`       | Add deny-all stub policies                                                                         | `false` |
-| `--policy-format`      | Policy output format (`auto`, `np`, `cnp`; default `auto`)                                         | `auto`  |
-| `--cilium`             | _(hidden, legacy alias for `--policy-format=cnp`)_                                                 | `false` |
-| `--kubeconfig`         | Path to kubeconfig for dry-run diff (hidden)                                                       | (none)  |
-| `-r, --report`         | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies` | (none)  |
-| `--top-n`              | Number of top entries in reports                                                                   | `10`    |
-| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                           | `false` |
-| `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                     | `false` |
+| Flag                   | Description                                                                                           | Default |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- | ------- |
+| `--config`             | Path to YAML config file                                                                              | (none)  |
+| `--source`             | Flow source type                                                                                      | `auto`  |
+| `--output`             | Output directory for policy YAML manifests                                                            | (none)  |
+| `--format`             | Report output format                                                                                  | `text`  |
+| `--strict`             | Disable safety margins                                                                                | `false` |
+| `--default-deny`       | Add deny-all stub policies                                                                            | `false` |
+| `--policy-format`      | Policy output format (`auto`, `np`, `cnp`; default `auto`)                                            | `auto`  |
+| `--cilium`             | _(hidden, legacy alias for `--policy-format=cnp`)_                                                    | `false` |
+| `--kubeconfig`         | Path to kubeconfig for dry-run diff (hidden)                                                          | (none)  |
+| `-r, --report`         | Repeatable report type: `top-flows`, `uncovered`, `coverage`, `egress-world`, `drops`, `anomalies`    | (none)  |
+| `--top-n`              | Number of top entries in reports                                                                      | `10`    |
+| `--generate-uncovered` | Generate additional policies for uncovered traffic (requires `--output`)                              | `false` |
+| `--skip-visualize`     | Skip generating flowguarder-visualization.html                                                        | `false` |
+| `--viz-layout`         | Visualization edge layout mode: `auto`, `straight`, `orthogonal`, `curved` (auto picks by graph size) | `auto`  |
 
 Ctrl-C or SIGTERM gracefully stops the stream.
 
@@ -284,9 +286,10 @@ When `--output` is set (and `--skip-visualize` is not used, which is the default
 
 - **Nodes** — namespaces appear as grouped containers; workloads are displayed inside their namespace; reserved peers (`world`, `cluster`, `host`, `remote-node`, `kube-apiserver`) and raw CIDRs are shown as distinct ungrouped nodes.
 - **Edges** — every traffic flow is an edge connecting source to destination, labeled with `protocol/port`. Direction (ingress/egress) is encoded by the edge colour and arrow.
-- **Interactions** — zoom and pan the graph, type to search workloads by name, and filter by namespace, protocol, port, or direction. Click any node to open a side panel with workload details and the rules that apply to it. Namespaces can be collapsed or expanded to reduce visual clutter.
+- **Layout modes** — choose the edge drawing style with `--viz-layout`: `straight` draws direct lines between nodes (the classic rendering, smallest file), `orthogonal` uses an ELK layered layout with right-angled edges suited to large or dense graphs, and `curved` places nodes with ELK and connects them with smooth arcs. The default `auto` picks `curved` for graphs up to 250 edges and 180 nodes and `orthogonal` for anything larger; `straight` is used only when explicitly requested via `--viz-layout=straight` (or the TUI field). An explicit value always wins over auto, and each generated HTML embeds only the assets its mode needs.
+- **Interactions** — zoom and pan the graph, type to search workloads by name, and filter by namespace, protocol, port, or direction. Click any node to open a side panel with workload details and the rules that apply to it. Namespaces can be collapsed or expanded to reduce visual clutter. Tap an edge to bold and brighten it, or tap a node to bold all of its connected edges; other edges dim while a selection is active, and clicking empty canvas clears the highlight. The Details panel can be collapsed and expanded with the toggle button in its header.
 - **Export** — PNG and JPG screenshots can be exported directly from the browser.
-- **Offline** — the file is fully self-contained: Cytoscape.js and the dagre layout engine are inlined (no external CDN) — it works without any network connection.
+- **Offline** — the file is fully self-contained and works without any network connection. Straight-mode files inline Cytoscape.js only; orthogonal and curved files additionally inline the ELK layout engine. Nothing is fetched from an external CDN.
 
 ```console
 $ flowguarder analyze flows.jsonl --output ./out
@@ -295,6 +298,8 @@ $ flowguarder analyze flows.jsonl --output ./out
 $ flowguarder live --hubble-server 127.0.0.1:4245 --output ./out
 # same output directory, visualization is generated when --output is set
 ```
+
+In live mode with `auto`, the layout mode may switch as the growing stream rewrites the visualization file.
 
 ![Visualization screenshot](docs/visualization-screenshot.png)
 

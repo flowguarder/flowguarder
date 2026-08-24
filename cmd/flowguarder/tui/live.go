@@ -189,6 +189,7 @@ func NewLiveTab() LiveTab {
 		NewNumberField("--top-n", "10", "Number of top entries in reports"),
 		NewBoolField("--generate-uncovered", "Generate policies for uncovered traffic"),
 		NewBoolField("--skip-visualize", "Skip generating the visualization HTML"),
+		NewSelectField("--viz-layout", []string{"auto", "straight", "orthogonal", "curved"}, "auto", "Visualization edge layout: auto, straight, orthogonal, curved"),
 		NewTextField("cluster_cidrs", "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fd00::/8, 100.64.0.0/10", "IP ranges considered internal (RFC 1918 + CGNAT + ULA), comma-separated"),
 		NewTextField("excluded_namespaces", "kube-system, calico-system, tigera-operator", "Namespaces whose flows are ignored, comma-separated"),
 		NewPortListField("kube_dns_ports", "UDP/53", "Well-known Kubernetes DNS ports"),
@@ -444,7 +445,7 @@ func (t *LiveTab) calicoNav(key string) bool {
 
 func (t LiveTab) renderCalicoPicker() string {
 	var b strings.Builder
-	pickerView := t.calicoFile.View()
+	pickerView := safeFilePickerView(t.calicoFile)
 	if t.calicoFile.CurrentDirectory != "/" && t.calicoFile.CurrentDirectory != "." && t.calicoCursorPos == 0 {
 		lines := strings.SplitN(pickerView, "\n", 2)
 		if len(lines) > 1 {

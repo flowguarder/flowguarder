@@ -1,4 +1,4 @@
- flowGuarder   v1.4.1   │  Analyze  Live  [Simulate]                                                              ? Help
+ flowGuarder   v1.4.2   │  Analyze  Live  [Simulate]                                                              ? Help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Source Pickers                                              Destination Pickers                                       
                                                                                                                         

@@ -1,26 +1,33 @@
 // Package visualize extracts a deterministic directed graph from policy
 // objects and renders it as an offline, self-contained HTML page.
 //
-// The HTML embeds Cytoscape.js, dagre, and cytoscape-dagre — no CDN
-// references — so it works completely offline.
+// The HTML embeds Cytoscape.js — no CDN references — so it works completely
+// offline. Three layout modes exist (see LayoutMode): "straight" embeds
+// Cytoscape only, while "orthogonal" and "curved" additionally embed the
+// elkjs bundle used by their layout engines. Each generated file carries
+// ONLY its own mode's assets.
 //
 // Architecture: an HTML template file (template.html) is embedded via go:embed.
 // Placeholder tokens (e.g. __CYTOSCAPE_JS__) are replaced at runtime with
 // embedded asset bytes and marshalled graph data using bytes.ReplaceAll.
-// Never use Go string constants for HTML/JS — keep templating in the HTML file.
+// Mode-specific template sections delimited by /*{{FG_*}}*/ ... /*{{/FG_*}}*/
+// sentinels are stripped per mode before substitution. Never use Go string
+// constants for HTML/JS — keep templating in the HTML file.
 //
 // License attribution:
 //
 //	Cytoscape.js — The MIT License.
 //	Copyright (c) 2016-2026, The Cytoscape Consortium.
 //
-//	Dagre — The MIT License.
-//	Copyright (c) 2012-2014, Chris Pettitt.
+//	elkjs 0.12.0 (lib/elk.bundled.js) — dual-licensed under
+//	EPL-2.0 OR GPL-3.0-or-later (SPDX, per package.json).
+//	The GPL-3.0-or-later term is chosen for this derivative;
+//	flowguarder is GPL-3.0, so distribution under flowguarder's
+//	GPL-3.0 satisfies the chosen term. No EPL-2.0 obligations attach.
+//	Copyright (c) Kiel University, sreal-software-solutions GmbH
+//	and contributors. Source: https://github.com/kieler/elkjs
 //
-//	cytoscape-dagre — The MIT License.
-//	(bundled under Cytoscape.js terms)
-//
-// All three libraries are included under The MIT License:
+// Cytoscape.js is included under The MIT License:
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
 // to deal in the Software without restriction, including without limitation
@@ -55,23 +62,74 @@ var templateFS []byte
 //go:embed assets/cytoscape.min.js
 var cytoscapeBytes []byte
 
-//go:embed assets/dagre.min.js
-var dagreBytes []byte
-
-//go:embed assets/cytoscape-dagre.min.js
-var cytoscapeDagreBytes []byte
+//go:embed assets/elk.bundled-0.12.0.js
+var elkBytes []byte
 
 // Template placeholder tokens (must match template.html).
 const (
 	phCytoscape  = "__CYTOSCAPE_JS__"
-	phDagre      = "__DAGRE_JS__"
-	phCyDagre    = "__CYTO_DAGRE_JS__"
+	phElk        = "__ENGINE_JS__"
 	phGraph      = "__GRAPH_DATA__"
 	phNamespaces = "__NAMESPACES__"
 	phProtocols  = "__PROTOCOLS__"
 	phDirections = "__DIRECTIONS__"
 	phSource     = "__SOURCE__"
+	phVizMode    = "__VIZ_MODE__"
 )
+
+// modeSection describes a delimited template region belonging to a subset of
+// layout modes. The sentinels are JS block comments, so any surviving region
+// stays syntactically valid after stripping.
+type modeSection struct {
+	open  string
+	close string
+	keep  func(mode LayoutMode) bool
+}
+
+// Template mode sections. FG_NONSTRAIGHT regions carry the ELK layout core
+// shared by orthogonal and curved; FG_ORTHO/FG_CURVED carry per-mode deltas;
+// FG_STRAIGHT wraps the legacy preset+multi-phase runner.
+var modeSections = []modeSection{
+	{open: "/*{{FG_NONSTRAIGHT}}*/", close: "/*{{/FG_NONSTRAIGHT}}*/",
+		keep: func(m LayoutMode) bool { return m == ModeOrthogonal || m == ModeCurved }},
+	{open: "/*{{FG_ORTHO}}*/", close: "/*{{/FG_ORTHO}}*/",
+		keep: func(m LayoutMode) bool { return m == ModeOrthogonal }},
+	{open: "/*{{FG_CURVED}}*/", close: "/*{{/FG_CURVED}}*/",
+		keep: func(m LayoutMode) bool { return m == ModeCurved }},
+	{open: "/*{{FG_STRAIGHT}}*/", close: "/*{{/FG_STRAIGHT}}*/",
+		keep: func(m LayoutMode) bool { return m == ModeStraight }},
+}
+
+// stripModeSections removes every non-active section (sentinels included) and
+// unwraps active sections (sentinels removed, content kept). Pure and
+// deterministic; errors if a sentinel pair is unbalanced.
+func stripModeSections(tmpl []byte, mode LayoutMode) ([]byte, error) {
+	out := tmpl
+	for _, sec := range modeSections {
+		for {
+			i := bytes.Index(out, []byte(sec.open))
+			if i < 0 {
+				break
+			}
+			j := bytes.Index(out[i+len(sec.open):], []byte(sec.close))
+			if j < 0 {
+				return nil, fmt.Errorf("template section %q opened but never closed", sec.open)
+			}
+			j += i + len(sec.open)
+			if sec.keep(mode) {
+				merged := append([]byte{}, out[:i]...)
+				merged = append(merged, out[i+len(sec.open):j]...)
+				merged = append(merged, out[j+len(sec.close):]...)
+				out = merged
+			} else {
+				merged := append([]byte{}, out[:i]...)
+				merged = append(merged, out[j+len(sec.close):]...)
+				out = merged
+			}
+		}
+	}
+	return out, nil
+}
 
 // graphDataDTO is the single JSON object the app script reads as GRAPH_DATA.
 // Keys match the lower-cased struct fields (Go serializes as "nodes"/"edges").
@@ -127,8 +185,16 @@ func nodeClasses(kind NodeKind) string {
 	}
 }
 
-// RenderHTMLWithSource renders the graph with an optional source string.
-func RenderHTMLWithSource(g Graph, w io.Writer, source string) error {
+// RenderHTMLWithSource renders the graph with an optional source string in the
+// given layout mode. The mode selects which engine assets are embedded:
+// straight ships Cytoscape only; orthogonal and curved additionally inline the
+// elkjs bundle. Output is deterministic per (graph, source, mode).
+func RenderHTMLWithSource(g Graph, w io.Writer, source string, mode LayoutMode) error {
+	tmpl, err := stripModeSections(templateFS, mode)
+	if err != nil {
+		return fmt.Errorf("strip mode sections: %w", err)
+	}
+
 	// 1. Marshal nodes to Cytoscape-formatted DTOs (with classes for style selectors).
 	nodeDTOs := make([]nodeDTO, 0, len(g.Nodes))
 	for _, n := range g.Nodes {
@@ -225,16 +291,25 @@ func RenderHTMLWithSource(g Graph, w io.Writer, source string) error {
 	// 6. Marshal source (HTML-escaped for safe embedding).
 	sourceJSON, _ := json.Marshal(source)
 
-	// 7. Replace placeholders in the template in a FIXED order.
-	out := templateFS
+	// 7. Marshal the mode as a quoted JSON string literal.
+	modeJSON, _ := json.Marshal(string(mode))
+
+	// 8. Replace placeholders in the template in a FIXED order. The engine
+	// slot receives the ELK bundle only for ELK-backed modes; straight leaves
+	// it empty so no engine bytes ship.
+	out := tmpl
 	out = bytesReplace(out, phCytoscape, cytoscapeBytes)
-	out = bytesReplace(out, phDagre, dagreBytes)
-	out = bytesReplace(out, phCyDagre, cytoscapeDagreBytes)
+	if mode == ModeOrthogonal || mode == ModeCurved {
+		out = bytesReplace(out, phElk, elkBytes)
+	} else {
+		out = bytesReplace(out, phElk, nil)
+	}
 	out = bytesReplace(out, phGraph, graphJSON)
 	out = bytesReplace(out, phNamespaces, nsJSON)
 	out = bytesReplace(out, phProtocols, protoJSON)
 	out = bytesReplace(out, phDirections, dirJSON)
 	out = bytesReplace(out, phSource, sourceJSON)
+	out = bytesReplaceToken(out, phVizMode, modeJSON)
 
 	if _, err := w.Write(out); err != nil {
 		return fmt.Errorf("write output: %w", err)
@@ -242,13 +317,19 @@ func RenderHTMLWithSource(g Graph, w io.Writer, source string) error {
 	return nil
 }
 
-// RenderHTML renders the graph (no source) — delegates to RenderHTMLWithSource.
+// RenderHTML renders the graph (no source) — delegates to RenderHTMLWithSource
+// pinned to ModeStraight. Test-only convenience.
 func RenderHTML(g Graph, w io.Writer) error {
-	return RenderHTMLWithSource(g, w, "")
+	return RenderHTMLWithSource(g, w, "", ModeStraight)
 }
 
 // bytesReplace replaces a placeholder comment with raw bytes.
 func bytesReplace(buf []byte, placeholder string, replacement []byte) []byte {
 	target := []byte("/* " + placeholder + " */")
 	return bytes.ReplaceAll(buf, target, replacement)
+}
+
+// bytesReplaceToken replaces a bare placeholder token (no comment wrapping).
+func bytesReplaceToken(buf []byte, token string, replacement []byte) []byte {
+	return bytes.ReplaceAll(buf, []byte(token), replacement)
 }

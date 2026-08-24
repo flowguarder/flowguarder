@@ -11,7 +11,7 @@ import (
 // alt-screen and double/ghost the Output and Run lines. The runner must
 // route them into the captured output shown in the Output pane instead.
 func TestTUIAnalyzeRunnerCapturesLogLines(t *testing.T) {
-	out, err := tuiAnalyzeRunner("../../flowlab/hubble-flows-before.jsonl", "", "text", "auto", false, false, false, []string{"top-flows"}, 10)
+	out, err := tuiAnalyzeRunner("../../flowlab/hubble-flows-before.jsonl", "", "text", "auto", false, false, false, []string{"top-flows"}, 10, "auto")
 	if err != nil {
 		t.Fatalf("runner error: %v", err)
 	}

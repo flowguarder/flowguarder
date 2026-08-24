@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/filepicker"
@@ -34,6 +35,7 @@ func NewAnalyzeTab() AnalyzeTab {
 		NewNumberField("--top-n", "10", "Number of top entries in reports"),
 		NewBoolField("--generate-uncovered", "Generate policies for uncovered traffic"),
 		NewBoolField("--skip-visualize", "Skip generating the visualization HTML"),
+		NewSelectField("--viz-layout", []string{"auto", "straight", "orthogonal", "curved"}, "auto", "Visualization edge layout: auto, straight, orthogonal, curved"),
 
 		// --- Config scalar / list options ---
 		NewTextField("cluster_cidrs", "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fd00::/8, 100.64.0.0/10", "IP ranges considered internal (RFC 1918 + CGNAT + ULA), comma-separated"),
@@ -66,11 +68,13 @@ func NewAnalyzeTab() AnalyzeTab {
 	}
 	form.focusIndex = -1
 
-	return AnalyzeTab{
+	at := AnalyzeTab{
 		picker:        picker,
 		form:          form,
 		pickerFocused: true,
 	}
+	at.refreshDirEntries()
+	return at
 }
 
 // padToLines pads or truncates a string to exactly n lines by splitting on
@@ -101,7 +105,7 @@ func (m Model) renderAnalyzeBody() string {
 	var left strings.Builder
 	left.WriteString(sectionTitle(m.activeArea == AreaAnalyzePicker, "Select flow source:"))
 	left.WriteString("\n")
-	src := m.analyzeTab.picker.Path
+	src := m.analyzeTab.sourceSelection()
 	if src == "" {
 		src = "(none selected)"
 	}
@@ -119,7 +123,7 @@ func (m Model) renderAnalyzeBody() string {
 		pickerH = 1
 	}
 	m.analyzeTab.picker.SetHeight(pickerH)
-	pickerView := m.analyzeTab.picker.View()
+	pickerView := safeFilePickerView(m.analyzeTab.picker)
 	if m.analyzeTab.picker.CurrentDirectory != "/" && m.analyzeTab.picker.CurrentDirectory != "." && m.analyzeTab.pickerCursorPos == 0 {
 		lines := strings.SplitN(pickerView, "\n", 2)
 		if len(lines) > 1 {
@@ -194,13 +198,123 @@ func (m Model) renderAnalyzeBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 }
 
+// refreshDirEntries mirrors bubbles filepicker v1.0.0 readDir ordering so
+// pickerCursorPos can be mapped to a concrete path without touching
+// unexported picker state: dirs first (alphabetical), then files
+// (alphabetical), hidden entries filtered unless ShowHidden.
+func (at *AnalyzeTab) refreshDirEntries() {
+	entries, err := os.ReadDir(at.picker.CurrentDirectory)
+	if err != nil {
+		at.dirEntries = nil
+		return
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() == entries[j].IsDir() {
+			return entries[i].Name() < entries[j].Name()
+		}
+		return entries[i].IsDir()
+	})
+	if !at.picker.ShowHidden {
+		out := entries[:0]
+		for _, e := range entries {
+			if hidden, _ := filepicker.IsHidden(e.Name()); hidden {
+				continue
+			}
+			out = append(out, e)
+		}
+		entries = out
+	}
+	at.dirEntries = entries
+	// Keep the synthetic cursor inside the rows that exist: never on the
+	// phantom ".." slot at "/" / ".", never past the last entry.
+	minPos := at.cursorMinPos()
+	at.pickerCursorPos = min(max(at.pickerCursorPos, minPos), max(minPos, len(entries)))
+}
+
+// sourceSelection returns the flow source the user is currently pointing at:
+// the browsed directory when the synthetic ".." row is highlighted,
+// otherwise the full path of the highlighted entry.
+func (at AnalyzeTab) sourceSelection() string {
+	if at.pickerCursorPos == 0 {
+		return at.picker.CurrentDirectory
+	}
+	i := at.pickerCursorPos - 1
+	if i < len(at.dirEntries) {
+		return filepath.Join(at.picker.CurrentDirectory, at.dirEntries[i].Name())
+	}
+	// Fallback: return picker.Path if dirEntries is stale (e.g. picker hasn't
+	// read the dir yet).  This can only happen during initialisation before
+	// refreshDirEntries has been called.
+	return at.picker.Path
+}
+
 // Values returns the current analyze option values keyed by field label,
 // including the selected source path under "Source". This round-trips every
 // analyze CLI flag and config key exposed by the form.
 func (at AnalyzeTab) Values() map[string]string {
 	v := at.form.Values()
-	v["Source"] = at.picker.Path
+	v["Source"] = at.sourceSelection()
 	return v
+}
+
+// cursorMinPos returns the lowest valid pickerCursorPos for the browsed
+// directory: 0 when the synthetic ".." row is rendered (any directory except
+// "/" and "."), 1 when it is not. At "/" and "." no ".." row exists visually,
+// so position 0 — which sourceSelection maps to the directory itself — must be
+// unreachable, or Source would disagree with the highlighted entry.
+func (at AnalyzeTab) cursorMinPos() int {
+	if at.picker.CurrentDirectory == "/" || at.picker.CurrentDirectory == "." {
+		return 1
+	}
+	return 0
+}
+
+// stepPickerCursor moves the bubbles picker's internal cursor by delta
+// positions by synthesizing individual up/down key messages (the same pattern
+// live.go uses for the Calico picker), keeping the rendered highlight aligned
+// with pickerCursorPos without touching unexported picker state.
+func stepPickerCursor(p *filepicker.Model, delta int) {
+	if delta == 0 {
+		return
+	}
+	key := tea.KeyMsg{Type: tea.KeyDown}
+	if delta < 0 {
+		key = tea.KeyMsg{Type: tea.KeyUp}
+		delta = -delta
+	}
+	for i := 0; i < delta; i++ {
+		np, _ := p.Update(key)
+		*p = np
+	}
+}
+
+// movePickerCursorTo drives both cursors to newPos: pickerCursorPos is set
+// directly, and the bubbles cursor is stepped to max(newPos-1, 0) so the
+// visually highlighted entry always equals sourceSelection(). The
+// max(..., 0) clamp makes the pos 0↔1 boundary transition a no-op for the
+// bubbles cursor (at pos 0 the highlight sits hidden behind the ".." row).
+func (at *AnalyzeTab) movePickerCursorTo(newPos int) {
+	delta := max(newPos-1, 0) - max(at.pickerCursorPos-1, 0)
+	stepPickerCursor(&at.picker, delta)
+	at.pickerCursorPos = newPos
+}
+
+// pickerPageSize returns the picker's scroll-page size for pgup/pgdown.
+// Height is deprecated in bubbles v1.0.0 (SetHeight is write-only, no getter),
+// but it is the only place the render-driven page height lives.
+func (at AnalyzeTab) pickerPageSize() int {
+	return max(at.picker.Height, 1) //nolint:staticcheck // SA1019: no getter exists in bubbles v1.0.0
+}
+
+// reanchorCursor re-syncs both cursors after the directory changed: position
+// restarts at the first row of the new directory and the bubbles cursor is
+// sent to the top ("g") so the rendered highlight matches — the picker's own
+// selectedStack restore would otherwise desync the two.
+func (at *AnalyzeTab) reanchorCursor() {
+	at.pickerCursorPos = at.cursorMinPos()
+	g := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}}
+	np, _ := at.picker.Update(g)
+	at.picker = np
 }
 
 // updateAnalyze handles messages while the Analyze tab is active. Tab and
@@ -208,45 +322,47 @@ func (at AnalyzeTab) Values() map[string]string {
 // between form/reports); all other keys are routed here. The file picker holds
 // focus first; selecting a file (enter) moves focus to the options form, and
 // esc returns focus to the picker. This mirrors the Live tab's focus model.
+//
+// Cursor invariant: every cursor-moving key is intercepted here and applied to
+// pickerCursorPos AND the bubbles cursor together (clamped to the rows that
+// actually exist), so whatever entry is visibly highlighted is exactly what
+// Values()["Source"] — and therefore Run — uses, including at
+// CurrentDirectory == "." where no ".." row is rendered.
 func (m Model) updateAnalyze(msg tea.Msg) (Model, tea.Cmd) {
 	if m.analyzeTab.pickerFocused {
-		// When on the synthetic ".." entry, handle navigation ourselves and
-		// prevent the Bubbles picker from moving its internal cursor. This
-		// keeps our synthetic cursor in sync: cursorPos==0 → "..", picker
-		// cursor at 0; cursorPos==1 → first file, picker cursor still at 0.
-		if m.analyzeTab.pickerCursorPos == 0 {
-			if key, ok := msg.(tea.KeyMsg); ok {
-				switch key.String() {
-				case "down", "j", "ctrl+n":
-					m.analyzeTab.pickerCursorPos++
-					return m, nil
-				case "up", "k", "ctrl+p", "pgup", "pgdown", "g", "K":
-					return m, nil
-				}
-			}
-		}
-
 		if key, ok := msg.(tea.KeyMsg); ok {
+			minPos := m.analyzeTab.cursorMinPos()
+			maxPos := max(minPos, len(m.analyzeTab.dirEntries))
 			switch key.String() {
-			case "up", "k", "ctrl+p":
-				if m.analyzeTab.pickerCursorPos > 0 {
-					m.analyzeTab.pickerCursorPos--
-				}
 			case "down", "j", "ctrl+n":
-				m.analyzeTab.pickerCursorPos++
+				m.analyzeTab.movePickerCursorTo(min(m.analyzeTab.pickerCursorPos+1, maxPos))
+				return m, nil
+			case "up", "k", "ctrl+p":
+				m.analyzeTab.movePickerCursorTo(max(m.analyzeTab.pickerCursorPos-1, minPos))
+				return m, nil
 			case "g":
-				m.analyzeTab.pickerCursorPos = 0
+				m.analyzeTab.movePickerCursorTo(minPos)
+				return m, nil
+			case "G":
+				m.analyzeTab.movePickerCursorTo(maxPos)
+				return m, nil
 			case "pgup", "K":
-				m.analyzeTab.pickerCursorPos = 0
+				m.analyzeTab.movePickerCursorTo(max(m.analyzeTab.pickerCursorPos-m.analyzeTab.pickerPageSize(), minPos))
+				return m, nil
+			case "pgdown", "J":
+				m.analyzeTab.movePickerCursorTo(min(m.analyzeTab.pickerCursorPos+m.analyzeTab.pickerPageSize(), maxPos))
+				return m, nil
 			case "enter":
 				if m.analyzeTab.pickerCursorPos == 0 {
 					parent := filepath.Dir(m.analyzeTab.picker.CurrentDirectory)
-					if parent != m.analyzeTab.picker.CurrentDirectory {
-						m.analyzeTab.picker.CurrentDirectory = parent
-						m.analyzeTab.picker.Path = ""
-						m.analyzeTab.pickerCursorPos = 0
-						return m, m.analyzeTab.picker.Init()
+					if parent == m.analyzeTab.picker.CurrentDirectory {
+						return m, nil
 					}
+					m.analyzeTab.picker.CurrentDirectory = parent
+					m.analyzeTab.picker.Path = ""
+					m.analyzeTab.reanchorCursor()
+					m.analyzeTab.refreshDirEntries()
+					return m, m.analyzeTab.picker.Init()
 				}
 			}
 		}
@@ -255,7 +371,8 @@ func (m Model) updateAnalyze(msg tea.Msg) (Model, tea.Cmd) {
 		picker, cmd := m.analyzeTab.picker.Update(msg)
 		m.analyzeTab.picker = picker
 		if picker.CurrentDirectory != oldDir {
-			m.analyzeTab.pickerCursorPos = 0
+			m.analyzeTab.reanchorCursor()
+			m.analyzeTab.refreshDirEntries()
 		}
 		// Selecting a file hands focus to the options form.
 		if didSelect, path := picker.DidSelectFile(msg); didSelect {

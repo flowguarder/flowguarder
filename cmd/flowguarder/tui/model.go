@@ -81,10 +81,10 @@ type policyLoadedMsg struct {
 
 // LiveRunner executes the live pipeline and returns captured output + error.
 // Injected by the CLI layer (package main) to bridge the package boundary.
-type LiveRunner func(ctx context.Context, source LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool, reports []string) (string, error)
+type LiveRunner func(ctx context.Context, source LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool, reports []string, vizLayout string) (string, error)
 
 // AnalyzeRunner executes the analyze pipeline and returns captured output + error.
-type AnalyzeRunner func(sourcePath, outputDir, format, policyFormat string, strict, defaultDeny, cilium bool, reports []string, topN int) (string, error)
+type AnalyzeRunner func(sourcePath, outputDir, format, policyFormat string, strict, defaultDeny, cilium bool, reports []string, topN int, vizLayout string) (string, error)
 
 // PolicyLoader loads policies from a directory and extracts selectable objects.
 // Injected by the CLI layer to avoid I/O in the TUI package.
@@ -218,7 +218,8 @@ type AnalyzeTab struct {
 	picker          filepicker.Model
 	form            Form
 	pickerFocused   bool
-	pickerCursorPos int // synthetic cursor index for virtual ".." entry
+	pickerCursorPos int           // synthetic cursor index for virtual ".." entry
+	dirEntries      []os.DirEntry // mirror of sorted picker listing (dirs first, then files)
 }
 
 // Model is the core Bubble Tea model for the TUI simulation.
@@ -852,7 +853,7 @@ func (m Model) renderSimulateBody() string {
 		// Render ".." entry: when cursor is at position 0, replace the
 		// picker's first line with ".." to avoid two simultaneous ">"
 		// indicators (the picker's own cursor on file[0] + our synthetic line).
-		pickerView := m.policyDirPicker.View()
+		pickerView := safeFilePickerView(m.policyDirPicker)
 		if m.policyDirPicker.CurrentDirectory != "/" && m.policyDirPicker.CurrentDirectory != "." && m.pickerCursorPos == 0 {
 			lines := strings.SplitN(pickerView, "\n", 2)
 			if len(lines) > 1 {
@@ -1761,8 +1762,9 @@ func (m Model) handleLiveRun() tea.Cmd {
 		policyFormat := liveVals["--policy-format"]
 		strict := liveVals["--strict"] == "true"
 		defaultDeny := liveVals["--default-deny"] == "true"
+		vizLayout := liveVals["--viz-layout"]
 
-		output, err := m.liveRunner(ctx, source, address, outputDir, format, policyFormat, strict, defaultDeny, m.liveTab.Reports.Values())
+		output, err := m.liveRunner(ctx, source, address, outputDir, format, policyFormat, strict, defaultDeny, m.liveTab.Reports.Values(), vizLayout)
 
 		// Write effective config YAML to the output directory on success.
 		if err == nil && outputDir != "" {
@@ -1812,8 +1814,9 @@ func (m Model) handleAnalyzeRun() tea.Cmd {
 				topN = parsed
 			}
 		}
+		vizLayout := v["--viz-layout"]
 
-		output, err := m.analyzeRunner(sourcePath, outputDir, format, policyFormat, strict, defaultDeny, cilium, reports, topN)
+		output, err := m.analyzeRunner(sourcePath, outputDir, format, policyFormat, strict, defaultDeny, cilium, reports, topN, vizLayout)
 
 		// Write effective config YAML to the output directory on success.
 		if err == nil && outputDir != "" {
@@ -1884,6 +1887,11 @@ func buildAnalyzeCLIPreview(m Model) string {
 	for _, r := range m.analyzeReports.Values() {
 		args = append(args, "--report", r)
 	}
+	// Deliberately outside the flags loop above: "auto" is the CLI default
+	// and must be omitted, which the loop's non-empty check cannot express.
+	if vl := v["--viz-layout"]; vl != "" && vl != "auto" {
+		args = append(args, "--viz-layout", vl)
+	}
 	return strings.Join(args, " ")
 }
 
@@ -1907,6 +1915,10 @@ func buildLiveCLIPreview(m Model) string {
 	}
 	for _, r := range m.liveTab.Reports.Values() {
 		args = append(args, "--report", r)
+	}
+	// Same omit-when-auto contract as buildAnalyzeCLIPreview.
+	if vl := m.liveTab.form.Values()["--viz-layout"]; vl != "" && vl != "auto" {
+		args = append(args, "--viz-layout", vl)
 	}
 	return strings.Join(args, " ")
 }

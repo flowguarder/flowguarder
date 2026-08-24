@@ -23,7 +23,7 @@ func newTUIRunners() tui.UnifiedOpts {
 	}
 }
 
-func tuiAnalyzeRunner(sourcePath, outputDir, format, policyFormat string, strict, defaultDeny, cilium bool, reports []string, topN int) (string, error) {
+func tuiAnalyzeRunner(sourcePath, outputDir, format, policyFormat string, strict, defaultDeny, cilium bool, reports []string, topN int, vizLayout string) (string, error) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{Use: "analyze", SilenceUsage: true, SilenceErrors: true}
 	cmd.SetOut(&buf)
@@ -59,7 +59,10 @@ func tuiAnalyzeRunner(sourcePath, outputDir, format, policyFormat string, strict
 		reports:           reports,
 		topN:              topN,
 		generateUncovered: false,
-		skipVisualize:     true,
+		// CLI parity: generate the visualization whenever policies are
+		// written; writeVisualizationHTML no-ops on empty outDir.
+		skipVisualize: outputDir == "",
+		vizLayout:     vizLayout,
 	}
 
 	if err := runAnalyzePipeline(cmd, sourcePath, &rootFlags); err != nil {
@@ -69,7 +72,7 @@ func tuiAnalyzeRunner(sourcePath, outputDir, format, policyFormat string, strict
 	return buf.String(), nil
 }
 
-func tuiLiveRunner(ctx context.Context, source tui.LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool, reports []string) (string, error) {
+func tuiLiveRunner(ctx context.Context, source tui.LiveSource, address, outputDir, format, policyFormat string, strict, defaultDeny bool, reports []string, vizLayout string) (string, error) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{Use: "live", SilenceUsage: true, SilenceErrors: true}
 	cmd.SetOut(&buf)
@@ -98,6 +101,7 @@ func tuiLiveRunner(ctx context.Context, source tui.LiveSource, address, outputDi
 		defaultDeny:  defaultDeny,
 		policyFormat: policyFormat,
 		reports:      reports,
+		vizLayout:    vizLayout,
 	}
 
 	switch source {

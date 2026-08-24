@@ -48,6 +48,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.cilium, "cilium", false, "emit CiliumNetworkPolicy instead of NetworkPolicy (hidden, alias for --policy-format=cnp)")
 	_ = rootCmd.PersistentFlags().MarkHidden("cilium")
 	rootCmd.PersistentFlags().BoolVar(&rootFlags.skipVisualize, "skip-visualize", false, "skip generating flowguarder-visualization.html")
+	rootCmd.PersistentFlags().StringVar(&rootFlags.vizLayout, "viz-layout", "auto", "visualization edge layout: auto, straight, orthogonal, curved")
 
 	rootCmd.PersistentFlags().StringVar(&rootFlags.kubeconfig, "kubeconfig", "", "path to kubeconfig for dry-run diff")
 

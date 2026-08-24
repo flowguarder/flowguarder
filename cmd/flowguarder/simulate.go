@@ -143,6 +143,8 @@ Examples:
 // ---------------------------------------------------------------------------
 
 func init() {
+	// The persistent --viz-layout flag does not apply to simulate; it only
+	// affects the HTML visualization written by analyze/live.
 	simulateCmd.Flags().StringVar(&simFlags.policies, "policies", "",
 		"directory of NetworkPolicy and CiliumNetworkPolicy YAML files")
 	simulateCmd.Flags().StringVar(&simFlags.src, "src", "",

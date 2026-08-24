@@ -8,8 +8,15 @@
 <!--
   flowguarder - Policy Visualization
   Cytoscape.js - MIT, Copyright (c) 2016-2026 The Cytoscape Consortium
-  dagre - MIT, Copyright (c) 2012-2014 Chris Pettitt
-  cytoscape-dagre - MIT
+/*{{FG_NONSTRAIGHT}}*/
+  elkjs 0.12.0 (lib/elk.bundled.js) — dual-licensed under
+  EPL-2.0 OR GPL-3.0-or-later (SPDX, per package.json).
+  The GPL-3.0-or-later term is chosen for this derivative;
+  flowguarder is GPL-3.0, so distribution under flowguarder's
+  GPL-3.0 satisfies the chosen term. No EPL-2.0 obligations attach.
+  Copyright (c) Kiel University, sreal-software-solutions GmbH
+  and contributors. Source: https://github.com/kieler/elkjs
+/*{{/FG_NONSTRAIGHT}}*/
 -->
 
 <style>
@@ -24,6 +31,7 @@
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);font-size:13px}
 #topbar{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:10px;font-size:14px;font-weight:600}
 #topbar .badge{font-size:11px;background:var(--accent2);color:#fff;padding:2px 8px;border-radius:10px}
+.brand-logo{flex:none;vertical-align:middle;border-radius:4px}
 #container{display:grid;grid-template-columns:240px 1fr 280px;height:calc(100vh - 44px)}
 .panel{background:var(--surface);border-right:1px solid var(--border);padding:12px;overflow-y:auto;display:flex;flex-direction:column}
 .panel:last-child{border-right:none;border-left:1px solid var(--border)}
@@ -51,6 +59,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .detail-row{margin-bottom:8px}
 .detail-label{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);margin-bottom:1px}
 .detail-value{font-size:12px;word-break:break-all;color:var(--fg)}
+/* Details panel collapse toggle */
+#details-header{display:flex;align-items:center;justify-content:space-between;gap:6px;height:29px}
+#details-toggle{flex:none;width:22px;height:22px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--fg);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+#details-toggle:hover{background:var(--border);border-color:var(--accent)}
+#details-toggle svg{display:block;width:14px;height:14px}
+#details-panel.collapsed #details-content{display:none}
+#details-panel.collapsed #details-header h3{display:none}
+#details-panel.collapsed #details-header{justify-content:center}
+#container.details-collapsed{grid-template-columns:240px 1fr 42px}
+#details-panel.collapsed #details-toggle svg{transform:rotate(180deg)}
 .kind-tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;color:#fff;margin:2px 2px}
 .kind-namespace{background:#30363d}.kind-workload{background:var(--workload-bg)}.kind-reserved{background:var(--reserved-bg)}.kind-cidr{background:var(--cidr-bg)}.kind-selector{background:var(--sel-bg)}
 #details-msg{color:var(--text-dim);font-style:italic;padding:20px;text-align:center}
@@ -68,8 +86,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 
 <!-- Embedded libraries (replaced by RenderHTML) -->
 <script>/* __CYTOSCAPE_JS__ */</script>
-<script>/* __DAGRE_JS__ */</script>
-<script>/* __CYTO_DAGRE_JS__ */</script>
+<script>/* __ENGINE_JS__ */</script>
 
 <!-- Graph data (replaced by RenderHTML) — var assignment wrappers -->
 <script>var GRAPH_DATA = /* __GRAPH_DATA__ */;</script>
@@ -80,12 +97,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </head>
 <body>
 <div id="topbar">
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-    <circle cx="12" cy="12" r="3"/><line x1="12" y1="5" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="19"/>
-    <line x1="5" y1="12" x2="2" y2="12"/><line x1="22" y1="12" x2="19" y2="12"/>
-    <line x1="7.5" y1="7.5" x2="5.6" y2="5.6"/><line x1="18.5" y1="18.5" x2="16.6" y2="16.6"/>
-    <line x1="7.5" y1="16.5" x2="5.6" y2="18.4"/><line x1="18.5" y1="5.5" x2="16.6" y2="3.6"/>
-  </svg>
+  <img class="brand-logo" width="24" height="24" alt="flowGuarder" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAUJUlEQVRo3t2aeZBdWX3fP+fu79371n69d0utXSNp9lUeZmU2GKbMEI9DOYtTMVUmVHAwjj0pE0KSSjA4rsQFNpgySVEhThFMKraxDcaDQYw9DLOPRiOpJbVa3a3eXr/ut959OfnjdbfUsxiMK6lKblW/Pu+ed879fX/L9/x+51z4f/wSf9sJ/tXfvZV2z1P27xp1dF0bTVI5ESfJSJJklTTLHCRCUYSracqGoWvLiqJcTuJ4eXZhqVewc9m//epL//cBfOihI/zli+fEB564p6qq6k09P7yn1fFub3f9/R3XH3D9KBfFiZpmmRCAoigYmprkc4ZfsHPr5UL+QqmQe9bJGydkJl/63Fe+3bz3tsPyd7519v8sgJ9/4BBfeGpafPZDD4ymGY+tNto/vVhv3lxf75a6bkCcJEgpd04rAMnmh0AIga6pOHmT4VqxNT5UfmmwWviqripf//Dnv738wQcOy9956kcH8iMBGMupfOrDj9Jodguarr13caX5wZmF+i0rjbYRRkl/ItGfTcj+lHLrnuwjkEiEuIJFyv7cpqExUitG+yaHXhgbLH8+TuI/HKwUu7/6+W+w6KY/VDb1h/3gA/cd5MT5hnjghskjHTf85MmzC7/82rnL+xotV81khiI2Be3rd3OUfIOG5HZ7+29zXJpltLqeurTWnnS98KFy0d6jKsr5rzxzofFz9x7k5UvrP74FnnzfTaxtdNSbj+19aG5x/d+9enbhpo2O23/4VWJuta8WP28ZxElKnKRv6ucNY7e+SwnVks11B8df3jU68LGTZ+e/NVB20k/9r7cP9Le1wMd++laCKNGO7Bt//5mZ5d988fTc4a4XXHGXTfObhkacvNnUh6aGydKMXhDtAPmWmtv8ogjwwpiVRntUVZW7jx4Yr9c3uqfvv24y+8szyz86gF949FouLtTVm4/uef/r5xd/49Xp+fE4SRECRmolrj04QcHOccuxKWqVImEU0/PC7fGaqnLbtVN4fkCj7f31Zt5EdrWV0jSjvt4pCSHuPLxndOmVM3OvP3jjbvns+foPB/D4LRN86dufYf31i+86c3H5N189Oz+epBlSwq7RKo/ddyNpmjE2XEFRFCxDY2igRKvj4QYRAig4OW6/dopO12NprbND44Kd2hdvQLPVn0lJo9l1dE279dZr90x//L/96/Mn//i7nF3uvD2Aiin4l//4QU78wfeOzS2t/9YLp2YPbbmHrqk8/I5r8YKQStFGERBGKWkm2Wi7rLd7+H60KZFksFpgqd6m0XLfQtgrMHa2dgLKpGS91SsVbOvIhadffub4tXvqTz03jZ+8DYCP/8xxOm5Q7HnRJ39wcvahrhcilH6fY1tMjddQBIwOFplb2mC95VIt5+m5PtOzK9tcmiQZhq7SaLm4frQd9Gy5idjStAICpNgJ7epYSZKMTs8fGRooFl0/fuqOaybCb786v92vbDXuO1DlyZ9/DMs03ntmZunxjbbbF36T1zMpmb28RtcNeXWmgZsZHLn+KNWxSdx4B5cgRH/1FVf5i+QKmUq52d6iXyk2nUduPW4bjqIINtoeZy6uvFfX1cd/5QPv5v5DtTdb4KNPHOfl03Nji6utT588d3lflmVv8tej+8bJMsno5AQHDkwxOTFMlqSs1JssLK7scAFVQBAlhFGyYx6x7elyc6F76xgQV98R0PNCo1LKD12YX/3mwd1D3W+8MHvFArdNFPh7P/kTJGn2npmF+i1bq+vVVyYlI7USNxzeRRr0OH7zNYwPV5kYrbBrYpAsuyKJpE+xuqq8QUA2tS+321ePeXMU9HsEEEYJMwtrt8Rx+p4nHrmV2yYLVwC8+64j/N4fPVNZ3eg8sdxoG+Jqs2+2nZyJY5tcrjc5c26OleUV2p0uErh4cWGHIFdLJ8UV99E1laJjoqnK9q8lEoS4kmbQX6LlG1xPCFheaxv1je4TX/3m85V3veOavqVvGbX5Ow/fTBDGP3F2duUXl+ptS7yB56QEKSWXV5u0uh6rjTbzy+vohs6Fi4s8+/wpojjeobeyYxEnKV4Yb+u07FiM1gp4YUwUp1fcZPMZYivH2KGJK1eSZlimXpkcqTy9Z2JwdubcHEqloPO+T/w+PTe4e7XRKW8bcYs5MhgfKvPo3ddz4+FdVIt5HrjjCCVDcurlk6xdXmB4oMBNR3ajKsr2w3ckoYBlaOweLjM6UKSQMzcNtBkN8kqIb2oLy9DImdpVjNX/qK93K64X3vNT/+Z/Mlg00a47vIvP/pN3FrpueIcf9CkvlRIFQSZhsOLwk++8idFaiTCOefrF87R7PkUnT1VTaXc89ozXqFULNJo95pYagEBu+qeuKdRKeUxDI5OQN/UdLrSlMLkNBBQhGB1wSCVcXm1vcRsC6Lg+HTe4/bMfvL9w9OBEV9s7OUwm5YhQOPDovdfRdQPmljZYrDfp9Hxs2wKg1XU5c3GZrutz9y0Hcb2Q6UsrVCsOhZzBH584SccNkBI0TSAR6LrKxFCRrhezVu9gaG/OXORV/xUgZ+nomkrOMnAsg9X1HmGcbLtZHKe0uv7+ieHK8J6Joa42OFBkud4aVxVl4ODuYUxD5dZjU7R7AU89e5rXphf58h/9FYau0e56HL9hP7qqUClYTI6Ucf0IXdfYaLtEScLURA1d0xgfKtPp+ZybW8H1oivOLq6IniFQhMDUVUqOxWDZplbOs9ToYOgads64EhLySorR6fm1LMsmatXCBcXJW6RpOqIoIp938pRrQ9iOjSoEOdPg6P5xorgfjMdvOMAd1+1Dyj57aKpKmmYkSUqWSfZNDPEz776NfZODtLsek6NV0nTL+H0BkiQjy/o+PlDMMVDMsWeswpHdQ0wOlei4IX4QU8wbOywluFJ4eEGUT9JsrGhbaKapk6ZZRRFCi3yfbiZRVZW1Zo8Du4aI4gw7bxJGMft3DVEuWCRpCgjSLENVFLwgIkoSFEXQbLss11usN9usNtqEUbzt5D0vYG6lSZSk7B2rMlixURAEUcJ6x6XnhURJhqFrZBlsh8obaCmKUy3NZCWft9AsUyfNslzecUShUiVwXQLfo1qyeeaVGQ7tGeHRu47x/KlLPH9qFsioFG0MXaXdC+j0AuobHbJMcmG+zvzyBj0vZGq0TM8LEQKcnMFQxWGobFOwLcYGi3hBTLvXry80VSWIU+ycwe6yw9J65ypW2iQmISHrB3qapiJNU6dWKaClWdYPkCxDCIXy4CBxGOJFq7S7HrOX6zh5E8e2cGyL7zx3FkPXUYRCEIXomkqa9RO0OEmJNrNXIaBayjMxXO6zkN6nRAAdlZyhUy3m6fkhi/UWqqqRIag3e6RJhkCQSYlhqIwNFhGCfjADuZzZf4YKWppkKIoahIEv2xvrQlUUco5NkmQIMtbXO3zjeyeZHK1x5w37ee61WZy8Sc4yWFproakKeVNntdHG9SNypsZw1WFyuIyTM1CFsp0+SCm3c5tMSlo9n/W2z2ithGXoNNo93CDeXqOb3YCDk4MMV5z+nc15Wm4oEUpvbd1F84IIVREbUZQlVj6nO8USvusSxzEl26JWzLPW8ZFInn11BlVVKNg52j2fk9OX0VWF4zfsY6DsMFyRTA6VcPImcZqSphJFvSoMN0nID2PqzR6KEIxUHXp+RKsXYOkqSGi0fTRNJW/q28K7QYSmKmiKAohEFTQ9z0fr9XwURVlO0sxze72SgiRfKFKu1RDKDNkm46iKYHykiq5rpFlGs+PiBxGhAm4QMlorUjBVcpZOvenS7nkADFUKlBwLJERxwnrbI4hiirZFmko2Ot52XT233KTjhShCkLc0JodKIGC97dF1A8ZqRdIsQ1EVT1WVpW7PR1tttFGEuJyk2dr0pdVSpZinaLeJU0EmM0CiKgoHdg/z1PdfJ00lxUKOKIhQFdA0jXOXVjkwVsE0NKSU9LyAJJVESUazG6AIQdsNiOKUQt7EMjV6XoiqKP1kcGmDZjfYXokzKbFzBoaukaQprZ7PeK2Eoal4YYyua2tCiMv19Q7azEKdPRO1VUUR5/70xGv700xStC1KhTw5XSAcC2VzN80LYiaGKwgBWRRiGip33nQQJ2ewttbsB6mU6JrKYNkhTlIW1zooAkqOhaGrNDs+XpBiGjpJlrHY6NJs+5tJqEBKiaIISpsZQBAmGJqKqatIIE4zio55PozilYXlDZRT03P8s8/8814hb30/b5n4QcTqepfp2RXiOCVJM1Y3Onz3B2dAwjV7Rtk7PoidM5kaG0RVFNZbPVSlL/xmLoaq9LcRB8sOu0YqSClZWe/2g94yGBgocu/t1/D333M7D915lJKT264pdFUhZ+oIJF4Q9xlsM1dKMkneMp79pS9+uXf6/AJqUVUp99qkSSa7bvhYfaObF5upn6oopDLFMgzCMOLwvnFUVeXc3DKWrjE+WuPA1Agzc6sU8kYfhICOG5KzdNJMEkQJfhjhBRGGptELYg7tH+f6QxMUnRyDw0NMDJeolfPML2/gBSEF22JqtG/pZselXMihaypRnJEJZb1adj596ft/MffN759HXfViDg07GIbeMnT1jsurzYNCCEZrBSaHywxXC1SL+X5u4uS58chuZhbWaHdcLMtg19gAs5fXsA0NofR5vuOG5C2dTErqzS550yBnmUzsHufwod2EccbSahNdVymXHOxikUJOo1Zx2OgGGKqg4pi03ZCWH2Pnc3hBgh/GDA4UTyiK8tvzy+vh156f79fErfUmH/0H94er6x01jpNHdg0V9T2jFZycibKZBqRZhkQQxRmLyw2KeYNeEOMGCbqm0HV9LENFURS6XkDO7FsgyzKiFA4e2ss9x69j3+5Rdk2MUCqVuDC3Qmtjg5Kdw7Id8jpce81exsZG0S2Lyand3HLjYQ7um6RYqbLaaAVDVefTD9555Ae//qWnWOnFfQB1N2FvLY+iKMt2zrw9juO9lqHt2MCUwNxSE0PXGKgU6Lo+Ms3o9nzyOZO1pku3F5AkGV0vpGRbxElGeWiEhx58B2bOYubSEq1Wj3LRplJ2GB0a6Mda4GMqEsO0qAxUGK467Nk9ysRIhZKTJ/V71FfrKILvCfjUzHzd/fLTM/2ScmuZ6TRa/MI/vN9bbnR67Z7/MFlmaZqyWV4JVKFg6AqeF9DzAjRFMFSxsU2NLE2oOBaKIphd3iBJU0xdJZNg5GxuvOEwN11/iKmpUVw/5rWzs5QLuX4MDJQ5c2GRnuthaApZEhMnGUurG5w/P8/ych3fD1lY3mgXbevjD9917IVf+8/fYrET7gSw2AmpGhAl6Vy5kB9rdrxbTU3d9mshwDR0cqZO3tTIWzpIUBSBpio0Oz7nFhq0ewHWZvXV9UOSwOXCuVm8KOXggd1MTg5jGAavvHaB0cEyjm0xPjZI14+ZW9pgud5iqd4iEwq1WoVMKLxy5hLVov0lz49++7Vzl+P//szF7cx0R4n07OklfvaRG+NMyrMIcVOr6+2ydHU7f9mZm/dBRXHCzFKT6fkGXhiTZZKeH+MGcZ+ZVJWqYzE/t4hqWExNTVKrlmh3PZaWVpicHCHv2AxVCuyaGGJyfIR9U2PsmRymNlBmbb1F6Ad/ZRrqrwwNFOtPfvG7ZFfJvANABrQaG3zo/Xc3VxqdmTBO7vT8cMA01DdtQEkkjbbH6UtrLK51kMBo1cHOGURJShSnuEFEztSxLYOSbXBxfoVDB/fiFApUy3lePzuHIlPKJQcjn8cwDfJ5m5xto5sm0xcWmLlw6XwxZ37kPffe+PInv/AnzKz7OwqdNxWpl9Y9gnaLX/vaC/M/ddfheT9Kj7t+WN5aTKC/4zazuMH0fIPu5t6nlOBHCZqmMFSxCeOUMEoJooTRWgHbMnDdALtYZPfkMJqmUKuVefHV8/S6PXQhUBSJTFPiOObsuUucPTMzb2nil37xd7/zrajV5GsvLLxR3Lc+H3jl0gYfftdRXjkzf/7YwYmZIE5v6nlBTVcV1tour1+qs7LeJZMSTVVwcgaKEERJihcmxEnGUMXB9SOiOEVVBINluw8+lVx7dB8gcOwcu3eNsd7qcX52keXVDWbnVzl5eob1tcY529Q++tQzr3/9kZv3yM/9+Zm3EvXtT2ieu7DGfddPyt/9/efPPXLX4VeEUPfPrbYmT8+uCi+I2YxtVEVQtE3KhRy2peMHMUGUYhkauqbghwlpljFSLWAaGs2Oy+Fr9uE4eRTNxNBVJseH2L9vF1Yux+yl5azbaj9dss2PfOXrz/z50YMT8rf+7PTbifnXH/K9MNPgnTeM84l/+vj89OzKdwt2TlUU5UDPD3NR3D+xyaTE9WO6XohlahRti54fIjNJ0TbpeiFJmlGyTUpODtf1SYXGgX0TSJmh6gZBkHDq1DSvvPx6M4v8/1Iu5J/82ffd9+pfPHea/7rJ9z8WAIDplS6//nsneOy2fa0oik9MjddODlSciiLEaBDGRpyk2/HtBjEl20TSL1oqhRxuEJFkkihJGSzb2KbB3MIyqm7i2DlOvX6eZ595yZubnf8OSfyxKEq+YGrq2j0f+eKbTmN+LABb15++cBFbSZP/9D9+9dxrJ177xuRI9dRgtaDaObMK2EmaiTTNkPRz+VYvJGeoaJqCF8T4YUyaZRTyJlGccHr6klyrN9aWLy89lYT+JzWV//DLP/fwK5/7yneS3/jDl39UsX68Vw3efWyEP/mzf89//MSXHcsyjnl+eHe76x9v9/zDrh8MpWlmt7qBpipCyVu66PlRZmhabOcNd7Dq1O1c7pxlaM9oqvhelKSn/sVnPtR9/L4n+YMXF/7GsvytX/b4R3fv5fzcsnj8wdtyOcsYlJkci5N0NMtkJcvIA6iq4mmqaCmqWM4kS36QrD330rQ3VCvJz/8NXiv4//L638x7wbDRYJteAAAAAElFTkSuQmCC">
   <span>flowGuarder</span>
   <span class="badge">Policy Visualization</span>
   <span class="badge" id="source-badge"></span>
@@ -133,7 +145,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div id="no-traffic"><span>&#x1F578;</span>No traffic data yet.<br><span style="font-size:12px">Policies or flows will render here.</span></div>
   </div>
   <div class="panel" id="details-panel">
-    <h3>Details</h3>
+    <div id="details-header"><h3>Details</h3><button id="details-toggle" title="Collapse/expand details" aria-label="Collapse/expand details"><svg viewBox="0 0 16 16" aria-hidden="true"><polyline points="6 3 11 8 6 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
     <div id="details-content">
       <div id="details-msg">Click a node or edge to see details</div>
     </div>
@@ -143,12 +155,23 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <script>
 (function(){'use strict';
 
+/* --- LAYOUT MODE --- */
+/* Injected by RenderHTMLWithSource as a JSON string literal:
+   "straight" | "orthogonal" | "curved". The Go side additionally strips
+   the non-active mode sections below at render time, so this file ships
+   only the code paths for its own mode; the constant is the runtime
+   record of which engine is embedded. */
+var VIZ_MODE=__VIZ_MODE__;
+
 /* --- DATA — lowercase "nodes"/"edges" matching JSON key casing --- */
 var DATA=(typeof GRAPH_DATA!=='undefined'&&GRAPH_DATA)?GRAPH_DATA:{nodes:[],edges:[]};
 var NS_LIST=(typeof NAMESPACES!=='undefined')?NAMESPACES:[];
 var PROTO_LIST=(typeof PROTOCOLS!=='undefined')?PROTOCOLS:[];
 var DIR_LIST=(typeof DIRECTIONS!=='undefined')?DIRECTIONS:[];
 var cy=null,selected=null,nsExpanded={},nsBtnEls={},nsSizes={};
+/* Set inside init() once positionNsButtons is defined there; lets the
+   details-toggle handler in bindEvents() reposition ns buttons after resize. */
+var posNsReposition=null;
 
 /* --- SOURCE BADGE --- */
 var sb=document.getElementById('source-badge');if(SOURCE){sb.textContent=SOURCE;if(SOURCE!=='null'&&SOURCE!==''){sb.style.display='inline-block'}else{sb.style.display='none'}}else{sb.style.display='none'}
@@ -157,7 +180,7 @@ var sb=document.getElementById('source-badge');if(SOURCE){sb.textContent=SOURCE;
 function initNsExpanded(){for(var i=0;i<DATA.nodes.length;i++){var dn=DATA.nodes[i];if(dn.data&&dn.data.kind==='namespace'&&dn.data.id){nsExpanded[dn.data.id]=true}}}
 initNsExpanded();
 
-// MERGE_PARALLEL_EDGES — dagre crashes on parallel edges in compound graphs;
+// MERGE_PARALLEL_EDGES — layered layout engines crash on parallel edges in compound graphs;
 // merge by (source,target,direction), combine protocol:port pairs, sort deterministically.
 (function(){
   var byKey={};
@@ -344,7 +367,13 @@ function toggleNS(nsId){
   /* Refresh Details panel if it shows this namespace or one of its children */
   if(selected&&(selected.id()===nsId||selected.data('parent')===nsId)){
     showDetails(selected);
-  }
+  }/*{{FG_NONSTRAIGHT}}*/
+  /* Reactive de-overlap: expansion/collapse resizes compartments */
+  fgDeOverlap();
+/*{{/FG_NONSTRAIGHT}}*//*{{FG_CURVED}}*/
+  /* Reactive lane re-assignment: visibility + geometry changed */
+  fgLaneAssign();
+/*{{/FG_CURVED}}*/
 }
 
 /* --- DETAILS PANEL --- */
@@ -407,7 +436,13 @@ function showAll(){
     n.style('text-valign','top');n.style('text-margin-y',-18);
     var b=nsBtnEls[n.id()];
     if(b){b.innerHTML=nsBtnIcon(true);b.title=nsBtnTitle(true)}
-  });
+  });/*{{FG_NONSTRAIGHT}}*/
+  /* Reactive de-overlap: expansion resizes compartments */
+  fgDeOverlap();
+/*{{/FG_NONSTRAIGHT}}*//*{{FG_CURVED}}*/
+  /* Reactive lane re-assignment: full expansion changes geometry */
+  fgLaneAssign();
+/*{{/FG_CURVED}}*/
 }
 
 /* --- EVENTS --- */
@@ -420,21 +455,57 @@ function bindEvents(){
     var ns=t.getAttribute('data-toggle-ns');
     if(ns){ev.preventDefault();ev.stopPropagation();toggleNS(ns)}
   })}
+  /* Details panel collapse/expand — shared by ALL layout modes.
+     Class-based state survives cytoscape re-renders (pan/zoom/layout never
+     touch these DOM classes). cy.resize() re-measures the canvas after the
+     grid column changes WITHOUT resetting user zoom/pan (no cy.fit). */
+  var dt=document.getElementById('details-toggle');
+  if(dt){dt.addEventListener('click',function(){
+    var panel=document.getElementById('details-panel');
+    var cont=document.getElementById('container');
+    var collapsing=(' '+panel.className+' ').indexOf(' collapsed ')===-1;
+    if(collapsing){
+      panel.className+=' collapsed';
+      cont.className+=' details-collapsed';
+      dt.title='Expand details';
+    }else{
+      panel.className=(' '+panel.className+' ').replace(' collapsed ',' ').replace(/^\s+|\s+$/g,'');
+      cont.className=(' '+cont.className+' ').replace(' details-collapsed ',' ').replace(/^\s+|\s+$/g,'');
+      dt.title='Collapse details';
+    }
+    cy.resize();
+    if(posNsReposition)posNsReposition()
+  })}
+  /* Tap-to-highlight — shared by ALL layout modes (no mode gating).
+     Each new selection REPLACES the previous one: clearHighlights() strips
+     BOTH hl and dim from every edge before new classes are added. */
+  function clearHighlights(){
+    cy.edges().removeClass('hl');
+    cy.edges().removeClass('dim');
+  }
   /* Deselect when clicking empty canvas */
   cy.on('tap',function(evt){
-    if(evt.target===cy){if(selected){selected.removeClass('selected');selected=null}showDetails(null)}
+    if(evt.target===cy){clearHighlights();if(selected){selected.removeClass('selected');selected=null}showDetails(null)}
   });
   /* Node click */
   cy.on('tap','node',function(evt){
     evt.stopPropagation();
     if(selected&&selected!==evt.target)selected.removeClass('selected');
     evt.target.addClass('selected');selected=evt.target;showDetails(evt.target);
+    /* Bold all connected edges; dim every other edge */
+    clearHighlights();
+    evt.target.connectedEdges().addClass('hl');
+    cy.edges().difference(evt.target.connectedEdges()).addClass('dim');
   });
   /* Edge click */
   cy.on('tap','edge',function(evt){
     evt.stopPropagation();
     if(selected)selected.removeClass('selected');
     evt.target.addClass('selected');selected=evt.target;showDetails(evt.target);
+    /* Bold the tapped edge; dim every other edge */
+    clearHighlights();
+    evt.target.addClass('hl');
+    cy.edges().difference(evt.target).addClass('dim');
   });
   /* Custom tooltip on hover — dependency-free, no popover API needed */
   cy.on('mouseover','node',function(evt){
@@ -448,10 +519,12 @@ function bindEvents(){
   cy.on('mouseout','edge',hideTooltip);
 }
 
-/* --- MULTI-PHASE LAYOUT (fixes namespace stretch from dagre compound children) --- */
-/* Problem (A): gridLayoutInsideNses set ns width/height AFTER dagre positioned them.
- * Grown ns (e.g. runai 620×462) then overwrote their neighbors → overlaps.
- * Fix: compute target ns sizes BEFORE dagre so dagre reserves correct spacing.
+/*{{FG_STRAIGHT}}*/
+/* --- MULTI-PHASE LAYOUT (fixes namespace stretch in compound graphs) --- */
+/* Problem (A): an earlier grid pass set ns width/height AFTER the layout engine
+ * positioned them. Grown ns (e.g. runai 620×462) then overwrote their neighbors
+ * → overlaps. Fix: compute target ns sizes BEFORE layout so the engine reserves
+ * correct spacing.
  */
 function computeNsSizes(){
   cy.nodes('[kind="namespace"]').forEach(function(ns){
@@ -460,7 +533,7 @@ function computeNsSizes(){
     var cnt=ch.length;
     var cols=Math.max(1,Math.ceil(Math.sqrt(cnt)));
     var rows=Math.ceil(cnt/cols);
-    /* Pre-compute: set size BEFORE dagre so it reserves this space */
+    /* Pre-compute: set size BEFORE layout so it reserves this space */
     var si=nsSizes[ns.id()];
     if(!si){si={};nsSizes[ns.id()]=si}
     si.w=cols*130+80;
@@ -478,7 +551,7 @@ function runMultiPhaseLayout(){
   /* 1) Compute namespace sizes — children MUST be attached (filters by data('parent')). */
   computeNsSizes();
 
-  /* 2) Hide selectors — dagre spreads them across full width via edges to workloads. */
+  /* 2) Hide selectors — layered layout spreads them across full width via edges to workloads. */
   cy.nodes('[kind="selector"]').forEach(function(s){s.style('display','none')});
 
   /* 3) Grid children inside namespaces BEFORE parent grid. */
@@ -631,6 +704,314 @@ function runMultiPhaseLayout(){
     correct();
   });});
 }
+/*{{/FG_STRAIGHT}}*//*{{FG_NONSTRAIGHT}}*/
+/* --- V2 LAYOUT: DIRECT-ELK layered (elkjs 0.12.0, no cytoscape-elk adapter) ---
+ * DEVIATION from plan T6 ('register via adapter'): prior probes showed dotted
+ * ELK options ('elk.direction', 'elk.edgeRouting', 'elk.layered.spacing.*')
+ * silently ignored through the adapter while pure ELK JSON calls work headless
+ * (T2 spike A3 PASS). We build an ELK JSON graph from the cytoscape elements,
+ * run new ELK().layout(graph), then apply returned positions back.
+ * ELK child coords are RELATIVE TO PARENT -> parent offsets are accumulated.
+ * Determinism: 'elk.randomizationSeed':1 + Go-sorted DTO order + no animation. */
+/** @suppress{checkTypes} */
+function runMultiPhaseLayout(){
+  /* Returns a promise that resolves after ELK layout + fit complete.
+     init() chains positionNsButtons() via .then() once resolved. */
+  return new Promise(function(resolve){
+    setTimeout(function(){
+      if(typeof ELK!=='function'){resolve(); return}
+      var elk=new ELK();
+
+      /* Anti-premature-stability guard: ELK runs SYNCHRONOUSLY (worker:false)
+         so positions are fully applied before any capture.js poll can complete.
+         This eliminates the async rendering window and all jitter/race complexity. */
+
+      /* Synthetic engine events: raw new ELK().layout() emits NO cytoscape
+         layout events, so capture-side engineTimeMs wiring would record null.
+          Trigger them manually. */
+      cy.trigger('layoutstart');
+
+      /* Leaf size estimation - pure function of DTO data (deterministic; avoids
+         dependence on render timing for label-based widths). */
+      function leafSize(n){
+        var k=n.data('kind');
+        if(k==='workload')return{w:56,h:56};
+        if(k==='selector')return{w:180,h:34};
+        var lbl=n.data('label')||n.id();
+        return{w:Math.max(64,lbl.length*7+24),h:32};
+      }
+
+      /* Build ELK JSON graph: root children = top-level nodes + compound parents
+         each with their own children arrays.
+         Edge placement (preset iterations, see evidence): lifting each edge to
+         its lowest common ancestor among DIRECT children (topmost-ancestor
+         endpoints at root for cross-compound edges, original endpoints inside
+         the shared compound otherwise) gives ELK real compound-level routing
+         constraints -> markedly better node positions than flat-at-root
+         (subset crossings 1539 vs 11172). Sections are NOT consumed; orthogonal
+         RENDERING is done by the renderer, see the curve-style block below. */
+       var parentOf={};
+       var rootChildren=[];
+       var elkById={};
+       cy.nodes().forEach(function(n){
+         parentOf[n.id()]=n.data('parent')||null;
+         var en={id:n.id()};
+         if(n.isParent()){
+           en.children=[];
+         }else{
+           var s=leafSize(n);
+           en.width=s.w;en.height=s.h;
+         }
+         elkById[n.id()]=en;
+         var p=n.data('parent');
+         if(p&&elkById[p]){elkById[p].children.push(en)}
+         else{rootChildren.push(en)}
+       });
+       /* EXPLICIT compound dimensions: compute children extent bounding box,
+          inflate by margin so ELK reserves enough space to prevent cytoscape
+          box-paint overhang from colliding with adjacent compartments. */
+        var COMPOUND_MARGIN_W=48, COMPOUND_MARGIN_H=32;
+       rootChildren.forEach(function(comp){
+         if(comp.children&&comp.children.length){
+           var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+           comp.children.forEach(function(ch){
+             var cx=ch.x||0,cy=ch.y||0,cw=ch.width||0,ch_2=ch.height||0;
+             if(cx<minX)minX=cx; if(cy<minY)minY=cy;
+             if((cx+cw)>maxX)maxX=cx+cw; if((cy+ch_2)>maxY)maxY=cy+ch_2;
+           });
+           var extW=Math.max(0,maxX-minX), extH=Math.max(0,maxY-minY);
+           comp.width=extW+COMPOUND_MARGIN_W;
+           comp.height=extH+COMPOUND_MARGIN_H;
+         }
+       });
+      function outerId(id){
+        var cur=id,p=parentOf[cur];
+        while(p){cur=p;p=parentOf[cur]}
+        return cur;
+      }
+      var elkEdges=[];
+      cy.edges().forEach(function(e){
+        var s=e.source().id(),t=e.target().id();
+        var eo={id:e.id(),sources:[s],targets:[t]};
+        var ps=parentOf[s],pt=parentOf[t];
+        if(ps===pt||outerId(s)===outerId(t)){
+          var cont=ps||pt;
+          if(cont&&elkById[cont]){
+            (elkById[cont].edges=elkById[cont].edges||[]).push(eo);
+          }else{
+            elkEdges.push(eo);
+          }
+        }else{
+          eo.sources=[outerId(s)];
+          eo.targets=[outerId(t)];
+          elkEdges.push(eo);
+        }
+      });
+      var graph={
+        id:'fgroot',
+        layoutOptions:{
+          'algorithm':'layered',
+          'elk.edgeRouting':'ORTHOGONAL',
+          'elk.direction':'DOWN',
+          'elk.randomizationSeed':1,
+          'elk.layered.spacing.nodeNode':'45',
+          'elk.layered.spacing.nodeNodeBetweenLayers':'85',
+          'elk.spacing.edgeNode':'15',
+          'elk.padding':'[top=40,left=30,bottom=30,right=30]'
+        },
+        children:rootChildren,
+        edges:elkEdges
+      };
+
+      elk.layout(graph).then(function(out){
+        /* Compound-dimension inflation: ELK computes compound sizes from children
+           only, but cytoscape renders parent boxes = children-bbox + style padding
+           + label overhang. Inflate compound w/h so ELK reserves extra space,
+           preventing adjacent compartment boxes from colliding. */
+        var INFLATE_W=48, INFLATE_H=32;
+        function inflateCompounds(en){
+          if(en.children&&en.children.length){
+            en.width=(en.width||0)+INFLATE_W;
+            en.height=(en.height||0)+INFLATE_H;
+            en.children.forEach(inflateCompounds);
+          }
+        }
+        inflateCompounds(out);
+        /* Apply positions top-down; ELK coords are relative to the parent box's
+           top-left corner -> accumulate parent offsets (T2 finding F3).
+           Cytoscape position() is the node CENTER; ELK x/y is the top-left. */
+        (function apply(en,ox,oy){
+          (en.children||[]).forEach(function(ch){
+            var ax=ox+(ch.x||0),ay=oy+(ch.y||0);
+            var cn=cy.getElementById(ch.id);
+            if(cn.length>0&&!cn.isParent()){
+              cn.position({x:Math.round(ax+(ch.width||0)/2),y:Math.round(ay+(ch.height||0)/2)});
+            }
+            apply(ch,ax,ay);
+          });
+          /* Record ELK compound sizes for toggleNS/showAll restore paths */
+          if(en!==graph&&en.children&&en.children.length){
+            nsSizes[en.id]={w:en.width||260,h:en.height||320,_computed:true};
+          }
+          })(out,0,0);
+/* Compartment de-overlap v4: parent-model-bbox separation (deterministic).
+   Runs at init AND reactively after every namespace expand/collapse so
+   post-expansion geometry stays clean (fgDeOverlap). */
+function descendants(id){
+  var out=[],stack=[id];
+  while(stack.length){
+    var pid=stack.pop();
+    cy.nodes().forEach(function(n){ if(n.data('parent')===pid){ out.push(n); stack.push(n.id()); } });
+  }
+  return out;
+}
+function fgDeOverlap(){
+  /* Measure the compartment's RENDERED footprint (box + label overhang) —
+     this is what the eye sees. Pushes are converted back to model units
+     by dividing by the current zoom. */
+  function rpbox(comp){
+    var p=comp.renderedPosition(),w=comp.renderedOuterWidth(),h=comp.renderedOuterHeight();
+    return {x1:p.x-w/2,y1:p.y-h/2,x2:p.x+w/2,y2:p.y+h/2};
+  }
+  var comps=cy.nodes('.compartment').toArray();
+  if(comps.length===0){ comps=cy.nodes('[kind="namespace"]').toArray(); }
+  if(window.console&&console.info){console.info('de-overlap v5: '+comps.length+' compartment(s), zoom '+cy.zoom().toFixed(3));}
+  comps.sort(function(a,b){return a.id()<b.id()?-1:1;});
+  var MAXIT=12,shifts=0;
+  for(var it=0;it<MAXIT;it++){
+    var moved=false;
+    for(var i=0;i<comps.length;i++)for(var j=i+1;j<comps.length;j++){
+      var A=rpbox(comps[i]),B=rpbox(comps[j]);
+      if(A.x1<B.x2&&B.x1<A.x2&&A.y1<B.y2&&B.y1<A.y2){
+        var pushM=((A.x2-B.x1)+12)/Math.max(cy.zoom(),0.01);
+        var dsc=descendants(comps[j].id());
+        var pj=comps[j].position();comps[j].position({x:pj.x+pushM,y:pj.y});
+        for(var k=0;k<dsc.length;k++){var q=dsc[k].position();dsc[k].position({x:q.x+pushM,y:q.y});}
+        shifts++;moved=true;
+      }
+    }
+    if(!moved)break;
+  }
+  if(window.console&&console.info){console.info('de-overlap v5: '+shifts+' shift(s) over '+MAXIT+' max iter');}
+}
+window.fgDeOverlap=fgDeOverlap;
+/* Init-time call: clean the as-laid-out geometry. */
+fgDeOverlap();
+/*{{FG_CURVED}}*/
+/* --- Lane-split routing (v2j) --------------------------------------
+   Problem: curve-style 'taxi' routes many edges through the same vertical
+   corridor at the SAME y, producing co-linear overlaps that hide arrows
+   and direction. Fix: after layout, cluster nodes into columns by x,
+   identify every vertical gap between consecutive columns, collect the
+   edges crossing each gap, sort them deterministically by target/source y,
+   and assign each edge its own lane offset inside the gap. Offsets are
+   stored per-edge as unbundled-bezier control points:
+     cpw[i] = fraction along source->target where gap g's mid-x sits
+     cpd[i] = signed perpendicular offset ≈ (laneY - straightLineY)
+   Result: zero co-linear overlap BY CONSTRUCTION — every edge in a gap
+   owns a distinct horizontal band. Pure arithmetic on positions ->
+   deterministic. Self-loops and same-column edges get no control points
+   (render as straight lines). */
+function fgLaneAssign(){
+  var LANE_PX=14, MAX_OFF=240;
+  /* 1. Cluster all top-level node left-x values into columns. */
+  var xs=[];
+  cy.nodes().forEach(function(n){
+    if(n.isParent()&&n.parents().length>0){return;} /* skip nested parents */
+    if(n.connectedEdges().length===0&&n.data('parent')){return;}
+    xs.push(n.position().x-n.width()/2);
+  });
+  if(xs.length<2){return;}
+  xs.sort(function(a,b){return a-b;});
+  var cols=[],last=null;
+  for(var i=0;i<xs.length;i++){
+    if(last===null||xs[i]-last>30){cols.push({left:xs[i],right:xs[i]});last=xs[i];}
+    else{cols[cols.length-1].right=xs[i];last=xs[i];}
+  }
+  function colIdx(n){
+    var l=n.position().x-n.width()/2,best=0,bd=Infinity;
+    for(var c=0;c<cols.length;c++){var d=Math.abs(cols[c].left-l);if(d<bd){bd=d;best=c;}}
+    return best;
+  }
+  /* 2. Bucket visible edges per crossed gap; clear stale lanes first. */
+  var gaps={};
+  var es=cy.edges().toArray();
+  for(var e=0;e<es.length;e++){es[e].removeData('cpd');es[e].removeData('cpw');}
+  for(e=0;e<es.length;e++){
+    var ed=es[e],s=ed.source(),t=ed.target();
+    if(s.id()===t.id()){continue;} /* self-loop */
+    var c1=colIdx(s),c2=colIdx(t),lo=Math.min(c1,c2),hi=Math.max(c1,c2);
+    for(var g=lo;g<hi;g++){(gaps[g]=gaps[g]||[]).push(ed);}
+  }
+  /* 3. Per-gap deterministic lane assignment. */
+  Object.keys(gaps).forEach(function(k){
+    var g=+k,list=gaps[k],gx=(cols[g].right+cols[g+1].left)/2;
+    list.sort(function(a,b){
+      var ay=a.target().position().y,by=b.target().position().y;
+      if(ay!==by)return ay-by;
+      ay=a.source().position().y;by=b.source().position().y;
+      if(ay!==by)return ay-by;
+      return a.id()<b.id()?-1:1;
+    });
+    var n=list.length;
+    for(var j=0;j<n;j++){
+      var ed=list[j],s=ed.source(),t=ed.target();
+      var sx=s.position().x+s.width()/2,tx=t.position().x-t.width()/2;
+      if(Math.abs(tx-sx)<1){continue;}
+      var sy=s.position().y,ty=t.position().y;
+      var w=(gx-sx)/(tx-sx);if(w<0.05)w=0.05;if(w>0.95)w=0.95;
+      var off=(j-(n-1)/2)*LANE_PX;
+      if(off>MAX_OFF)off=MAX_OFF;if(off<-MAX_OFF)off=-MAX_OFF;
+      /* Control-point distance = perpendicular offset from the straight
+         line at weight w. Lane offsets ARE relative to that line, so
+         dist = off directly (near-horizontal rank layouts make the
+         perpendicular ≈ vertical distinction negligible). */
+      var cpd=ed.data('cpd')||[],cpw=ed.data('cpw')||[];
+      cpd.push(off);cpw.push(Math.round(w*1000)/1000);
+      ed.data('cpd',cpd);ed.data('cpw',cpw);
+    }
+  });
+  /* 4. Sort each edge's control points ascending by weight (required order). */
+  for(var q=0;q<es.length;q++){
+    var ed2=es[q],D=ed2.data('cpd'),W=ed2.data('cpw');
+    if(!D||D.length<2){continue;}
+    var idx=[];for(var z=0;z<D.length;z++)idx.push(z);
+    idx.sort(function(a,b){return W[a]-W[b];});
+    var D2=[],W2=[];for(z=0;z<idx.length;z++){D2.push(D[idx[z]]);W2.push(W[idx[z]]);}
+    ed2.data('cpd',D2);ed2.data('cpw',W2);
+  }
+  if(window.console&&console.info){console.info('lane-split: '+Object.keys(gaps).length+' gap(s) assigned');}
+}
+window.fgLaneAssign=fgLaneAssign;
+/* Init-time call: lanes follow the de-overlapped geometry. */
+fgLaneAssign();
+/*{{/FG_CURVED}}*/
+/* Orthogonal routing proof: ELK's sections are unusable for depth-2
+         flattened edges (no sections returned, DEVIATION-2), so orthogonal
+         RENDERING is done by the renderer itself: curve-style 'taxi' draws a
+         deterministic L-shaped (axis-parallel) route between the ELK node
+         positions. Pure geometry of positions -> deterministic. Curve-style is
+         declared in the static stylesheet (no post-layout batch needed). */
+      cy.trigger('layoutstop');
+      cy.fit({padding:50, animate:false});
+      /* Force a synchronous render frame after fit to flush any pending
+         texture updates. This eliminates the cold/warm bimodal variance
+         from paint-phase/AA rasterization. */
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          /* Layout + fit + paint complete; resolve. */
+          resolve();
+        });
+      });
+      }).catch(function(err){
+        cy.trigger('layoutstop');
+        if(window.console&&console.error){console.error('ELK layout failed:',err)}
+        resolve();
+      });
+    },0);
+  });
+}
+/*{{/FG_NONSTRAIGHT}}*/
 /* --- INIT --- */
 function init(){
   if(DATA.nodes.length===0&&DATA.edges.length===0){
@@ -665,19 +1046,39 @@ function init(){
         'text-outline-width':0,'text-valign':'center','text-halign':'center',
         'shape':'ellipse','width':180,'height':'label','padding':8,'font-size':'11px',
         'text-wrap':'ellipsis','text-max-width':160,'overlay-opacity':0}},
-      {selector:'edge',style:{'width':2,'line-color':'#ccc','target-arrow-color':'#ccc',
+/*{{FG_STRAIGHT}}*/      {selector:'edge',style:{'width':2,'line-color':'#ccc','target-arrow-color':'#ccc',
         'target-arrow-shape':'triangle','content':function(e){return e.data('label')||((e.data('protocol')||'')+':'+(e.data('port')||''))},'color':'#c9d1d9','font-size':9,'text-background-color':'#161b22','text-background-opacity':0.7,'text-background-padding':2,'arrow-scale':1.4}},
       {selector:'edge.ingress',style:{'line-color':'#8b5cf6','target-arrow-color':'#8b5cf6',
         'line-style':'dashed'}},
+/*{{/FG_STRAIGHT}}*//*{{FG_ORTHO}}*/      {selector:'edge',style:{'width':2,'line-color':'#ccc','target-arrow-color':'#ccc',
+        'target-arrow-shape':'triangle','curve-style':'taxi','content':function(e){var l=e.data('label')||((e.data('protocol')||'')+':'+(e.data('port')||''));var parts=l.split(':');var seen={},u=[];for(var i=0;i<parts.length;i++){if(!seen[parts[i]]){seen[parts[i]]=true;u.push(parts[i])}}return u.length>3?u[0]+':'+u[1]+':'+(u.length-2)+' more':l;},'color':'#c9d1d9','font-size':9,'text-background-color':'#161b22','text-background-opacity':0.7,'text-background-padding':2,'text-opacity':0,'arrow-scale':2.0}},
+      {selector:'edge.ingress',style:{'line-color':'#a78bfa','target-arrow-color':'#a78bfa',
+        'line-style':'dashed','line-dash-pattern':[6,3]}},
+/*{{/FG_ORTHO}}*//*{{FG_CURVED}}*/      {selector:'edge',style:{'width':2,'line-color':'#ccc','target-arrow-color':'#ccc',
+        'target-arrow-shape':'triangle','curve-style':'unbundled-bezier',
+        'control-point-distances':'data(cpd)','control-point-weights':'data(cpw)','content':function(e){var l=e.data('label')||((e.data('protocol')||'')+':'+(e.data('port')||''));var parts=l.split(':');var seen={},u=[];for(var i=0;i<parts.length;i++){if(!seen[parts[i]]){seen[parts[i]]=true;u.push(parts[i])}}return u.length>3?u[0]+':'+u[1]+':'+(u.length-2)+' more':l;},'color':'#c9d1d9','font-size':9,'text-background-color':'#161b22','text-background-opacity':0.7,'text-background-padding':2,'text-opacity':0,'arrow-scale':2.0}},
+      {selector:'edge.ingress',style:{'line-color':'#a78bfa','target-arrow-color':'#a78bfa',
+        'line-style':'dashed','line-dash-pattern':[6,3]}},
+/*{{/FG_CURVED}}*/
       {selector:'edge.egress',style:{'line-color':'#38bdf8','target-arrow-color':'#38bdf8',
         'line-style':'solid'}},
+      /* Tap-to-highlight styles — shared by ALL layout modes (must stay OUTSIDE
+         every FG_ mode-gating sentinel span). Later selectors win, so the
+         direction-specific .hl entries override the base bold below.
+         Documented behaviors: hidden edges render no classes in practice
+         (classes on hidden elements are harmless); merged-parallel edges
+         highlight as ONE merged edge. */
+      {selector:'edge.hl',style:{'width':4,'target-arrow-width':9}},
+      {selector:'edge.ingress.hl',style:{'line-color':'#c4b5fd','target-arrow-color':'#c4b5fd'}},
+      {selector:'edge.egress.hl',style:{'line-color':'#7dd3fc','target-arrow-color':'#7dd3fc'}},
+      {selector:'edge.dim',style:{'opacity':0.15}},
       {selector:'highlight',style:{'outline-width':3,'outline-color':'#58a6ff',
         'outline-opacity':0.8,'outline-offset':4}},
     ],
-    /* Construction layout must NOT move nodes: the inlined cytoscape dagre
-       extension runs its layout pass asynchronously (deferred), which would
-       clobber the positions set synchronously by runMultiPhaseLayout() below.
-       Use 'preset' (no-op) — runMultiPhaseLayout() does all positioning. */
+    /* Construction layout must NOT move nodes: engine layout passes run
+       deferred/asynchronously and would clobber positions set by
+       runMultiPhaseLayout() below. Use 'preset' (no-op) —
+       runMultiPhaseLayout() does all positioning. */
     layout:{name:'preset'},
     minZoom:0.05,maxZoom:3,
     userPanningEnabled:true,userZoomingEnabled:true,
@@ -702,6 +1103,7 @@ function init(){
       btn.style.display='flex';
     }
   }
+  posNsReposition=positionNsButtons;
   function createNsButtons(){
     var container=document.getElementById('ns-btn-container');
     if(!container)return;
@@ -727,10 +1129,13 @@ function init(){
   /* layoutstop for the preset construction layout fires before this handler is
      registered, so the multi-phase layout runs explicitly below instead */
   cy.on('layoutstop',function(){positionNsButtons()});
-  /* Multi-phase layout: run explicitly because the initial dagre (from the
-     construction options) completes synchronously during cytoscape() and its
-     layoutstop fires before any cy.on('layoutstop') can be registered */
-  runMultiPhaseLayout();
+  /* Multi-phase layout: run explicitly because the construction layout
+     completes synchronously during cytoscape() and its layoutstop fires
+     before any cy.on('layoutstop') can be registered *//*{{FG_STRAIGHT}}*/
+  runMultiPhaseLayout();/*{{/FG_STRAIGHT}}*//*{{FG_NONSTRAIGHT}}*/
+  runMultiPhaseLayout().then(function(){
+    positionNsButtons()
+  });/*{{/FG_NONSTRAIGHT}}*/
   /* Initial position after layout has run */
   positionNsButtons();
 

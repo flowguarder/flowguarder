@@ -48,6 +48,7 @@ type rootCmdData struct {
 	topN              int
 	generateUncovered bool
 	skipVisualize     bool
+	vizLayout         string // visualization edge layout: auto|straight|orthogonal|curved
 }
 
 var validReports = map[string]bool{
@@ -90,6 +91,11 @@ func validatePolicyFormat(format string) error {
 
 // runAnalyzePipeline executes the full analyze pipeline and returns any error.
 func runAnalyzePipeline(cmd *cobra.Command, sourcePath string, rd *rootCmdData) error {
+	// 0. Fail fast on an invalid --viz-layout before any parsing/policy work.
+	if _, err := visualize.SelectLayoutMode(0, 0, rd.vizLayout); err != nil {
+		return err
+	}
+
 	// 1. Load config
 	cfg, err := config.Load(rd.configPath)
 	if err != nil {
@@ -337,11 +343,7 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 		cmd.Printf("Wrote policy files to %s\n", outDir)
 
 		// 10a. Generate HTML visualization
-		src := sourcePath
-		if src == "-" {
-			src = "stdin"
-		}
-		if err := writeVisualizationHTML(outDir, pols, src, rd.skipVisualize); err != nil {
+		if err := writeVisualizationHTML(outDir, pols, vizSourceLabel(sourcePath), rd.skipVisualize, rd.vizLayout); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not write visualization: %v\n", err)
 		}
 	}
@@ -384,6 +386,26 @@ func executeAnalysis(cmd *cobra.Command, flows []flow.Flow, cfg config.Config, r
 	}
 
 	return nil
+}
+
+// vizSourceLabel returns a human-readable label for flow source input used in
+// the visualization header badge.  Rules:
+//
+//	"-"  → "stdin"
+//	""   → "current directory"
+//	"."  → "current directory"
+//	paths  → filepath.Base(path)+" /" for directories, unchanged otherwise
+func vizSourceLabel(src string) string {
+	if src == "-" {
+		return "stdin"
+	}
+	if src == "" || src == "." {
+		return "current directory"
+	}
+	if info, err := os.Stat(src); err == nil && info.IsDir() {
+		return filepath.Base(src) + "/"
+	}
+	return src
 }
 
 func hasReservedEntityEgress(pols []policy.Policy) bool {
@@ -456,12 +478,23 @@ func writeCiliumYAML(dir string, pols []policy.Policy, flows []flow.Flow, worklo
 // writeVisualizationHTML generates an HTML visualization of the policy graph
 // and writes it atomically to outDir as "flowguarder-visualization.html".
 // If skip is true or outDir is empty the function is a no-op (returns nil).
-func writeVisualizationHTML(outDir string, pols []policy.Policy, source string, skip bool) error {
+func writeVisualizationHTML(outDir string, pols []policy.Policy, source string, skip bool, layoutMode string) error {
+	// Validate the requested layout mode BEFORE any file or directory writes.
+	// "" is equivalent to "auto"; values are STRICT lowercase.
+	if _, err := visualize.SelectLayoutMode(0, 0, layoutMode); err != nil {
+		return err
+	}
+
 	if skip || outDir == "" {
 		return nil
 	}
 
 	g := visualize.BuildGraph(pols)
+
+	mode, err := visualize.SelectLayoutMode(len(g.Nodes), len(g.Edges), layoutMode)
+	if err != nil {
+		return fmt.Errorf("resolving layout mode: %w", err)
+	}
 
 	tmpFile, err := os.CreateTemp(outDir, ".viz-*.html.tmp")
 	if err != nil {
@@ -476,7 +509,7 @@ func writeVisualizationHTML(outDir string, pols []policy.Policy, source string, 
 		_ = os.Remove(tmpName)
 	}()
 
-	if err := visualize.RenderHTMLWithSource(g, tmpFile, source); err != nil {
+	if err := visualize.RenderHTMLWithSource(g, tmpFile, source, mode); err != nil {
 		return fmt.Errorf("rendering visualization: %w", err)
 	}
 

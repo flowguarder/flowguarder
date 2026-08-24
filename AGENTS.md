@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-08-04 (refreshed 2026-08-16, updated 2026-08-22)
+**Generated:** 2026-08-04 (refreshed 2026-08-16, updated 2026-08-24)
 
 ## OVERVIEW
 flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble and Calico, detects anomalies, and emits Kubernetes NetworkPolicy / CiliumNetworkPolicy YAML manifests.
@@ -8,10 +8,11 @@ flowGuarder is a Go CLI that analyzes Kubernetes network flow logs from Hubble a
 ## STRUCTURE
 ```
 flowguarder/
-├── cmd/flowguarder/   # CLI commands and analysis pipeline (~1195 LOC)
+├── cmd/flowguarder/   # CLI commands and analysis pipeline (~1270 LOC)
 │   ├── reports.go     # Report type validation (validateReports, 14 LOC)
 │   ├── tui_runners.go # Glue: TUI → analyze/live pipelines (captured output, log rerouting)
-│   ├── tui/           # Unified 3-tab Bubble Tea TUI (~8000 LOC; see cmd/flowguarder/tui/AGENTS.md)
+│   ├── tui/           # Unified 3-tab Bubble Tea TUI (~8300 LOC; see cmd/flowguarder/tui/AGENTS.md)
+│   ├── visualize/     # Policy graph visualization: 3 layout modes (see cmd/flowguarder/visualize/AGENTS.md)
 ├── pkg/
 │   ├── analyze/       # Flow classification, workload aggregation, statistics
 │   │   ├── classify.go
@@ -42,7 +43,7 @@ flowguarder/
 │   └── simulate/      # Traffic simulation against policy manifests (loader.go, eval_np.go, eval_cnp.go, types.go + tests)
 ├── testdata/          # Shared fixture files for parser tests
 ├── flowlab/           # Demo dataset (hubble-flows-before.jsonl, 17MB; tracked in git since 334abec) — Dockerfile, kind-config.yaml, demo-pods.yaml, docker-run.sh, entrypoint.sh; dump-hubble/main.go, validate-hubble/main.go (ONLY other main packages in module); flowlab-shared/ (empty)
-├── cmd/flowguarder/visualize/  # Policy graph visualization: BuildGraph (model.go, 410 LOC) + RenderHTMLWithSource (render.go, 254 LOC, inlined Cytoscape.js, no CDN)
+├── cmd/flowguarder/visualize/  # Policy graph visualization: BuildGraph (model.go) + RenderHTMLWithSource (render.go) + SelectLayoutMode (layoutmode.go); 3 layout modes, self-contained offline HTML
 ├── policies-calico/   # generated Calico policy artifacts (untracked)
 ├── policies-hubble/   # generated Hubble policy artifacts (untracked)
 ├── policies-hubble-cilium/  # generated Hubble+Cilium policy artifacts (untracked)
@@ -90,7 +91,8 @@ flowguarder/
 | Build | func | pkg/policy/builder.go (1377 LOC) | Abstract policy model with dual-carry CIDR twins + entity sentinels |
 | BuildCilium | func | pkg/policy/cilium.go (677 LOC) | CiliumNetworkPolicy render of entity form (skips CIDR twins) |
 | BuildGraph | func | cmd/flowguarder/visualize/model.go (~183) | Builds abstract graph (Node/Edge/Graph) from []policy.Policy; pure + sorted |
-| RenderHTMLWithSource | func | cmd/flowguarder/visualize/render.go | Self-contained offline HTML (inlined Cytoscape.js + dagre, no CDN) |
+| RenderHTMLWithSource | func | cmd/flowguarder/visualize/render.go | Renders HTML for a layout mode (straight/orthogonal/curved); per-mode asset embedding |
+| SelectLayoutMode | func | cmd/flowguarder/visualize/layoutmode.go | Auto/manual layout mode resolution (binding thresholds, strict validation) |
 | writeCiliumYAML | func | cmd/flowguarder/common_pipeline.go | CLI-side CNP writer, used by both analyze and live pipelines |
 | resolveEntitySet | func | pkg/policy/cilium.go (549-582) | Computes entity sets; host↔remote-node closure |
 | parseWorkloadSelectorV2 | func | cmd/flowguarder/common_pipeline.go (line 658) | Reads NetPol CIDR twins, frozen |
@@ -152,4 +154,5 @@ goreleaser release --snapshot        # artifacts land in out/ (dist: out), nothi
 - `policies2/` was removed in commit de4b49e ("output removal"). `policies-calico/`, `policies-hubble/`, `policies-hubble-cilium/` are untracked review artifacts.
 - New config keys: `apiserver_workload_selector` (struct: ns+name, defaults to kube-system/kube-apiserver when present) + `node_cidrs` (optional IP ranges); NetworkPolicy renders node /32 + node_cidrs, never service-range `10.96.0.0/12`.
 - Port-scan detector (`pkg/anomaly/portscan.go`) has a known dormant bug: its global `flowFlows` slice is never wired (declared nil-initialized at portscan.go:82, never assigned anywhere) — the detector is effectively a silent no-op; do not rely on it until wired.
-- Current version 1.4.1; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
+- Current version 1.4.2; rootCmd.Version references the version var (root.go:16 `Version: version`) so `--version` and `flowguarder version` stay consistent, including under goreleaser ldflags injection.
+- Visualization: three layout modes (`straight`/`orthogonal`/`curved`); auto mode resolves via SelectLayoutMode thresholds on post-BuildGraph counts; each HTML embeds only its mode's engine (straight = Cytoscape-only; ortho/curved inline elk.bundled-0.12.0 under GPL-3.0-or-later attribution). TUI Analyze auto-generates the HTML alongside policies; badge/header source follows the highlighted picker entry (no Enter needed).

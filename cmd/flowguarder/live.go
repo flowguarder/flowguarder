@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flowguarder/flowguarder/cmd/flowguarder/tui"
+	"github.com/flowguarder/flowguarder/cmd/flowguarder/visualize"
 	"github.com/flowguarder/flowguarder/pkg/analyze"
 	"github.com/flowguarder/flowguarder/pkg/anomaly"
 	"github.com/flowguarder/flowguarder/pkg/config"
@@ -93,6 +94,11 @@ func init() {
 // runLiveCommand connects to a live flows source and runs the analysis pipeline.
 func runLiveCommand(cmd *cobra.Command) error {
 	if err := validatePolicyFormat(rootFlags.policyFormat); err != nil {
+		return err
+	}
+
+	// Fail fast on an invalid --viz-layout before connecting to any source.
+	if _, err := visualize.SelectLayoutMode(0, 0, rootFlags.vizLayout); err != nil {
 		return err
 	}
 
@@ -315,7 +321,7 @@ func runLiveAfterParse(cmd *cobra.Command, flows []flow.Flow, srcType parser.Sou
 		cmd.Printf("Wrote policy files to %s\n", rootFlags.outputDir)
 
 		// Generate HTML visualization
-		if err := writeVisualizationHTML(rootFlags.outputDir, pols, source, rootFlags.skipVisualize); err != nil {
+		if err := writeVisualizationHTML(rootFlags.outputDir, pols, vizSourceLabel(source), rootFlags.skipVisualize, rootFlags.vizLayout); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not write visualization: %v\n", err)
 		}
 	}
